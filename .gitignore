@@ -1,0 +1,132 @@
+### macOS ###
+# General
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Icon must end with two \r
+Icon
+
+
+# Thumbnails
+._*
+
+# Files that might appear in the root of a volume
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Directories potentially created on remote AFP share
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+### Swift ###
+# Package Manager
+Packages/
+.build/
+DerivedData/
+
+# Cocoapods
+#
+# We recommend against adding the Pods directory to your .gitignore. However
+# you should judge for yourself, the pros and cons are documented at:
+# https://guides.cocoapods.org/using/using-cocoapods.html#should-i-check-the-pods-directory-into-source-control
+#
+# Pods/
+
+# Carthage
+#
+# Add this line if you want to avoid checking in source code from Carthage dependencies.
+# Carthage/Checkouts
+Carthage/Build/
+
+# Accio dependency manager
+Dependencies/
+.accio/
+
+# fastlane
+#
+# It is recommended to not store the screenshots in the git repo. Instead, use fastlane to re-generate the
+# screenshots whenever they are needed.
+# For more information about the recommended setup visit:
+# https://docs.fastlane.tools/best-practices/source-control/
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output
+
+# Code Injection
+#
+# After new code Injection tools there's a generated folder /iOSInjectionProject
+# https://github.com/johnno1962/injectionforxcode
+iOSInjectionProject/
+
+# Playgrounds
+timeline.xctimeline
+playground.xcworkspace
+
+# Misc
+*.xctestproducts
+
+### Xcode ###
+# Xcode
+#
+# gitignore contributors: remember to update Xcode.gitignore, Objective-C.gitignore,
+# and Swift.gitignore if you change this file.
+## User settings
+xcuserdata/
+*.xcuserdatad
+
+## compatibility with Xcode 8 and earlier (ignoring index)
+*.xcindex
+
+## compatibility with Xcode 3 and earlier (ignoring project predecessor file)
+*.pbxuser
+*.mode1v3
+*.mode2v3
+
+## compatibility with Xcode 3 and earlier (ignoring legacy breakpoints structure)
+*.perspectivev3
+
+## Xcode Patch Files
+*.xcodeproj/*.xcscmblueprint
+*.xcodeproj/*.xcschememanagement.plist
+
+## Build generated
+build/
+DerivedData/
+*.[oa]
+
+## Various settings
+*.xcscheme
+
+## Mobile Provisioning Profiles
+*.mobileprovision
+*.provisionprofile
+
+## Optional Pod integration
+# Pods/
+
+## Rome artifact cache generation
+# Rome/
+
+## Swift Package Manager
+# Add this line if you want to avoid checking in source code from Swift Package Manager dependencies.
+# Packages/
+# Package.resolved is usually checked into source control
+
+# Bundle artefact
+*.bundle
+
+# Manifest Sandbox Residuals
+*.sandbox
+
+# *.moved-aside files, typically created when Agreeing to Xcode licence agreement
+*.moved-aside
