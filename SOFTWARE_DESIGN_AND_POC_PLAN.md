@@ -1,16 +1,16 @@
 # Software Design Document & POC Implementation Plan: ImageToForm-iOS
 
-**Document Version:** 1.0
+**Document Version:** 2.0 (Revised for Enhanced Clarity)
 **Date:** April 14, 2025
 **Project:** ImageToForm-iOS Proof of Concept
 
-**Purpose:** This document outlines the software architecture and detailed design for the ImageToForm-iOS application's full vision. It also provides a step-by-step requirements breakdown and technical implementation guide for building the initial Proof of Concept (POC), intended for developers, including junior engineers.
+**Purpose:** This document outlines the software architecture and detailed design for the ImageToForm-iOS application's full vision. It also provides a step-by-step requirements breakdown and technical implementation guide for building the initial Proof of Concept (POC), intended for developers, including junior engineers requiring highly explicit instructions.
 
 ---
 
 ## Part 1: Software Architecture Outline (Full Vision)
 
-This section describes the high-level structure and components envisioned for the complete, robust application designed for on-device form filling from images.
+This section describes the high-level structure and components envisioned for the *complete*, robust application designed for on-device form filling from images.
 
 **1.1. Goal:**
 To create a modular, efficient, and reliable on-device system for extracting structured data from images (like insurance cards, labels) and automatically populating mobile application forms, minimizing user effort and errors.
@@ -41,7 +41,7 @@ To create a modular, efficient, and reliable on-device system for extracting str
 
 **1.4. High-Level Data and Control Flow:**
 
-The typical flow involves the UI Layer initiating a scan request via the Coordination Layer. The Coordinator activates the Capture Service, which provides a processed image buffer. This buffer is passed to the Core Extraction Service for OCR. The resulting raw text, along with context, goes to the Parsing & Validation Service. The structured, validated data (or errors) are returned via the Coordinator to the Presentation Layer, which updates the form fields or displays appropriate messages, always allowing user review. Asynchronous operations with completion handlers, delegates, or reactive patterns (like Combine) manage the flow between background processing and main thread UI updates.
+The typical flow involves the UI Layer initiating a scan request via the Coordination Layer. The Coordinator activates the Capture Service, which provides a processed image buffer. This buffer is passed to the Core Extraction Service for OCR. The resulting raw text, along with context, goes to the Parsing & Validation Service. The structured, validated data (or errors) are returned via the Coordinator to the Presentation Layer, which updates the form fields or displays appropriate messages, always allowing user review. Asynchronous operations with completion handlers, delegates, or reactive patterns (like Combine) manage the flow between background processing and main thread UI updates. The system is designed such that components interact through well-defined interfaces, promoting decoupling.
 
 ---
 
@@ -67,9 +67,9 @@ This section provides more specific design details for the components outlined i
 * **Preprocessing Pipeline:** Define a clear sequence of operations within an `ImagePreprocessor` class or similar. Use `Vision` (`VNDetectRectanglesRequest`) for detecting document boundaries/corners. Use `Core Image` (`CIFilter` like `CIPerspectiveCorrection`, `CIColorControls`) and/or Apple's `Accelerate` framework (`vImage` functions) for efficient cropping, deskewing, and enhancement (e.g., contrast stretching, thresholding). Perform these operations on background threads.
 
 **2.4. Core Extraction Service:**
-* **Vision Framework:** Primary interface. Encapsulate `VNImageRequestHandler` creation and `VNRequest` execution.
+* **Primary Tool:** Apple `Vision` framework.
 * **Text Recognition:** Utilize `VNRecognizeTextRequest`. Configure properties like `recognitionLevel` (`.accurate` preferred for stills), `usesLanguageCorrection`, potentially `customWords` if common non-dictionary terms are expected (like specific medical terms).
-* **Object Detection (Optional):** If specific object detection (beyond simple rectangles) is needed, use `VNCoreMLRequest` with a `.mlmodel` file. The model itself needs to be sourced (pre-trained if available and suitable, or custom-trained). Model management involves bundling or using Core ML's deployment features.
+* **Object Detection (Optional):** If specific object detection (beyond simple rectangles) is needed, use `VNCoreMLRequest` with a suitable `.mlmodel` file. The model itself needs to be sourced (pre-trained if available and suitable, or custom-trained). Model management involves bundling or using Core ML's deployment features.
 * **Error Handling:** Catch errors thrown by `VNImageRequestHandler.perform()` and handle errors passed to `VNRequest` completion handlers.
 
 **2.5. Parsing & Validation Service:**
@@ -86,197 +86,464 @@ This section provides more specific design details for the components outlined i
 
 ---
 
-## Part 3: Proof of Concept (POC) - Implementation Plan
+## Part 3: Proof of Concept (POC) - Detailed Implementation Plan (Enhanced Clarity)
 
-This section provides a step-by-step guide for building the minimal POC. Each step includes Functional Requirements (FR), Non-Functional Requirements (NFR), and Technical Design/Implementation details.
+This section provides a step-by-step guide for building the minimal POC, with highly explicit instructions suitable for a junior developer or someone needing very clear guidance. Each step builds directly on the previous one.
 
-**Goal:** Validate core on-device text detection and OCR using Vision on a single captured image, displaying raw results with visual feedback.
+**Goal:** Validate core on-device text detection and OCR using Apple's Vision framework on a single captured image, displaying the raw text results and visual bounding box feedback.
 
 **Technology:** Swift, SwiftUI, Vision, UIImagePickerController.
 
 ---
 
-### Step 1: Project Setup & Basic UI Layout
+### Step 0: Project Setup
+
+* **0.A: Functional Requirements:**
+    * FR0.1: Create a new, runnable iOS application project in Xcode.
+    * FR0.2: Configure the project with basic necessary settings (Bundle ID, Privacy Description).
+    * FR0.3: Set up Git version control with appropriate ignored files.
+* **0.B: Non-Functional Requirements:**
+    * NFR0.1: The project must use Swift as the language and SwiftUI as the Interface/Life Cycle.
+    * NFR0.2: The project must target a reasonably modern iOS version (e.g., iOS 15.0+) to ensure Vision framework support.
+    * NFR0.3: The project must include the necessary privacy key for camera usage in its configuration file.
+* **0.C: Technical Design & Implementation:**
+    1.  **Create Project:** Open Xcode. Select File -> New -> Project. Choose the "iOS" tab and select the "App" template. Click Next.
+    2.  **Project Options:**
+        * Product Name: `ImageToFormPOC`
+        * Team: (Select your development team if applicable)
+        * Organization Identifier: Enter your unique identifier (e.g., `com.yourcompanyname` or `io.github.yourusername`). Xcode uses this to create the Bundle Identifier.
+        * Interface: Select `SwiftUI`.
+        * Life Cycle: Select `SwiftUI App`.
+        * Language: Select `Swift`.
+        * Uncheck "Use Core Data". Uncheck "Include Tests" (you can add tests later). Click Next.
+    3.  **Save Project:** Choose a location on your computer to save the project. Make sure the "Create Git repository on my Mac" checkbox is checked. Click Create.
+    4.  **Set Deployment Target:** In the Project Navigator (left panel), click the top blue project icon (`ImageToFormPOC`). Select the `ImageToFormPOC` target under "TARGETS". Go to the "General" tab. Under "Deployment Info", set the "iOS" version dropdown to `15.0` (or a later version if preferred).
+    5.  **Add Privacy Description:** Go to the "Info" tab for the `ImageToFormPOC` target. Under "Custom iOS Target Properties", hover over the last row and click the (+) button that appears. From the dropdown list, select "Privacy - Camera Usage Description". In the "Value" column next to it, type a clear reason for needing the camera, for example: `This app needs access to the camera to scan documents and extract text.` Xcode saves this automatically.
+    6.  **Configure Gitignore:** Open a text editor (like TextEdit or VSCode). Copy the entire `.gitignore` content provided in the previous response (the standard Swift/Xcode template). Save this file *exactly* as `.gitignore` (note the leading dot, no `.txt` extension) in the main folder of your project (the folder containing the `.xcodeproj` file). In your terminal, navigate to this project folder and commit these initial files:
+        ```bash
+        git add .
+        git commit -m "Initial project setup with settings and gitignore"
+        ```
+    7.  **Verification:** Build and run the app (Cmd+R) on a Simulator or a connected physical device. It should launch showing the default "Hello, World!" SwiftUI template without errors. Stop the app.
+
+---
+
+### Step 1: Basic UI Layout
 
 * **1.A: Functional Requirements:**
-    * FR1.1: The app must display a screen with a title (e.g., "POC Scanner").
-    * FR1.2: The screen must contain a button labeled "Scan Document".
-    * FR1.3: The screen must have a designated area to display a captured image (initially empty or showing a placeholder message).
-    * FR1.4: The screen must have a designated area to display extracted text results (initially empty or showing a placeholder message).
+    * FR1.1: Display the title "POC Scanner".
+    * FR1.2: Display a button labeled "Scan Document".
+    * FR1.3: Display a placeholder area where the captured image will appear later.
+    * FR1.4: Display a placeholder area where the extracted text results will appear later.
 * **1.B: Non-Functional Requirements:**
-    * NFR1.1: The project must be configured for iOS using Swift and SwiftUI.
-    * NFR1.2: Basic privacy requirements (Camera Usage description) must be configured in `Info.plist`.
-    * NFR1.3: The initial UI layout should be clean and understandable.
-    * NFR1.4: Appropriate state variables must be declared to hold future data (captured image, results).
+    * NFR1.1: The UI must be built using SwiftUI.
+    * NFR1.2: The layout should vertically stack the title, image area, text area, and button.
+    * NFR1.3: The UI must use `@State` variables to manage the data that will change (captured image, Vision results, and the state controlling the camera presentation).
 * **1.C: Technical Design & Implementation:**
-    1.  **Project Creation:** Follow standard Xcode procedures to create a new iOS App project named `ImageToFormPOC` using the SwiftUI interface and Swift language. Set the minimum deployment target (e.g., iOS 15.0).
-    2.  **Info.plist:** Add the key `NSCameraUsageDescription` (Privacy - Camera Usage Description) and provide a user-facing string explaining why camera access is needed.
-    3.  **Git Setup:** Initialize a git repository, add the standard Swift `.gitignore` file.
-    4.  **ContentView Structure:** Open `ContentView.swift`. Embed the main content within a `NavigationView` (optional, for title). Use a `VStack` for the main vertical layout.
-    5.  **State Variables:** Declare the necessary `@State` variables at the top of `ContentView`:
+    1.  **Open ContentView:** In Xcode's Project Navigator, find and open the `ContentView.swift` file.
+    2.  **Import Vision:** Add `import Vision` at the top of the file, below `import SwiftUI`. We will need types from Vision later.
+    3.  **Declare State Variables:** Inside the `struct ContentView: View { ... }` definition, *before* the `var body: some View { ... }` line, add these `@State` variables:
         ```swift
-        @State private var capturedImage: UIImage? = nil
-        @State private var visionResults: [VNRecognizedTextObservation] = [] // Store full results
-        @State private var showingImagePicker = false // To trigger the sheet
+        @State private var capturedImage: UIImage? = nil // Holds the photo taken by the user
+        @State private var visionResults: [VNRecognizedTextObservation] = [] // Holds results from Vision
+        @State private var showingImagePicker = false // Controls showing the camera
         ```
-    6.  **UI Elements:**
-        * Add `Text` views for titles/placeholders.
-        * Add the `Button("Scan Document")` and set its action to toggle the `showingImagePicker` state variable: `self.showingImagePicker = true`.
-        * Create a `ZStack` or `VStack` to contain the image display area. Use an `if let image = capturedImage` block. Inside, use `Image(uiImage: image).resizable().scaledToFit()`. Outside (or in an `else` block), display a placeholder `Text`. Add modifiers like `.frame()` and `.border()` to define this area visually.
-        * Create a `List` or scrollable `VStack` to display results. Initially, it can just show placeholder text. Later, it will iterate over `visionResults`. Use `Spacer()` to push the button towards the bottom if desired.
-    7.  **Sheet Presentation:** Attach the `.sheet(isPresented: $showingImagePicker)` modifier to the main `VStack` or `NavigationView`. The content of the sheet will be the `ImagePicker` view created in the next step.
+    4.  **Structure the Body:** Replace the default `VStack { Image(...); Text("Hello, world!") }` inside `var body: some View { ... }` with the following structure:
+        ```swift
+        NavigationView { // Use NavigationView to easily add a title bar
+            VStack { // Main vertical layout
+                // Placeholder for Image and Overlay (Step 6)
+                ZStack {
+                    if let image = capturedImage {
+                        // We will display the actual image here later
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            // Overlay will be added here in Step 6
+                    } else {
+                        // Placeholder when no image is captured yet
+                        Text("Capture an image to see results.")
+                            .padding()
+                            .foregroundColor(.gray)
+                    }
+                }
+                .frame(minHeight: 200, maxHeight: 400) // Define visual size for the image area
+                .border(Color.gray, width: 1) // Show border for the image area
+                .padding([.leading, .trailing, .bottom]) // Add some spacing
+
+                // Placeholder for Text Results (Step 5)
+                List {
+                    Section("Extracted Text:") {
+                        // Text results will be shown here later
+                        Text("Scan an image to view extracted text.")
+                           .foregroundColor(.gray)
+                    }
+                }
+                // Make the List take up available space dynamically
+                .listStyle(InsetGroupedListStyle()) // Optional styling
+
+                Spacer() // Pushes the button towards the bottom
+
+                // The button to start scanning
+                Button("Scan Document") {
+                    // Action: Set the state variable to true to show the camera sheet
+                    self.showingImagePicker = true
+                }
+                .padding() // Add padding around the button
+                .buttonStyle(.borderedProminent) // Make the button look prominent
+
+            } // End of main VStack
+            .navigationTitle("POC Scanner") // Set the title in the navigation bar
+            .navigationBarTitleDisplayMode(.inline) // Style the title
+            // Add the .sheet modifier to present the Image Picker (Step 2)
+            .sheet(isPresented: $showingImagePicker) {
+                // The content here will be the ImagePicker view created next
+                // For now, add a placeholder Text view:
+                Text("Image Picker will go here")
+            }
+        } // End of NavigationView
+        ```
+    5.  **Verification:** Build and run the app (Cmd+R). You should see:
+        * A navigation bar with the title "POC Scanner".
+        * An empty gray-bordered rectangle with the text "Capture an image...".
+        * A list area below it with the text "Scan an image...".
+        * A prominent "Scan Document" button at the bottom.
+        * Tapping the button should present a temporary sheet saying "Image Picker will go here". Dismiss the sheet manually for now. Stop the app.
 
 ---
 
 ### Step 2: Implement Image Capture Functionality
 
 * **2.A: Functional Requirements:**
-    * FR2.1: Tapping the "Scan Document" button must present the native iOS camera interface modally.
-    * FR2.2: The user must be able to take a photo using the interface.
-    * FR2.3: The user must be able to confirm the taken photo or retake/cancel.
-    * FR2.4: If the user confirms a photo, the app must receive the `UIImage` object.
-    * FR2.5: If the user cancels, the camera interface must be dismissed without providing an image.
-    * FR2.6: The camera interface must be dismissed automatically after the user confirms or cancels.
+    * FR2.1: Tapping "Scan Document" presents the live camera view (or photo library if camera unavailable).
+    * FR2.2: The user can capture/select a photo or cancel.
+    * FR2.3: If a photo is confirmed, the app receives it as a `UIImage`.
+    * FR2.4: The camera/picker view dismisses automatically after user action (confirm or cancel).
 * **2.B: Non-Functional Requirements:**
-    * NFR2.1: The implementation must use the standard `UIImagePickerController` for simplicity in the POC.
-    * NFR2.2: The app must correctly handle the delegate callbacks for both successful image picking and cancellation.
-    * NFR2.3: The app should attempt to use the camera source type but fall back to the photo library if the camera is unavailable (e.g., running on Simulator).
-    * NFR2.4: Captured image data must be passed back to the `ContentView` for display and processing.
+    * NFR2.1: Use `UIImagePickerController` wrapped in `UIViewControllerRepresentable` for SwiftUI integration.
+    * NFR2.2: Implement required delegate protocols (`UINavigationControllerDelegate`, `UIImagePickerControllerDelegate`).
+    * NFR2.3: Pass the captured `UIImage` back to `ContentView` using `@Binding`.
+    * NFR2.4: Dismiss the view controller correctly using `presentationMode`.
 * **2.C: Technical Design & Implementation:**
-    1.  **Create ImagePicker File:** Create a new Swift file named `ImagePicker.swift`. Import `SwiftUI`, `UIKit`.
-    2.  **UIViewControllerRepresentable:** Define a struct `ImagePicker: UIViewControllerRepresentable`.
-    3.  **Bindings & Environment:** Add `@Binding` properties for the `selectedImage: UIImage?` and `visionResults: [VNRecognizedTextObservation]` (to pass results back and clear old ones). Add `@Environment(\.presentationMode)` to dismiss the sheet.
-    4.  **Coordinator Class:** Define a nested `class Coordinator: NSObject, UINavigationControllerDelegate, UIImagePickerControllerDelegate`. Give it a reference back to its `ImagePicker` parent (`let parent: ImagePicker`).
-    5.  **Coordinator Delegates:** Implement the required delegate methods within the `Coordinator`:
-        * `imagePickerController(_:didFinishPickingMediaWithInfo:)`: Retrieve the `.originalImage` as a `UIImage`. Assign it to `parent.selectedImage`. Clear the `parent.visionResults` binding (to remove stale results). *Crucially, trigger the image processing function here (to be implemented in Step 3)*. Call `parent.presentationMode.wrappedValue.dismiss()`.
-        * `imagePickerControllerDidCancel(_:)`: Simply call `parent.presentationMode.wrappedValue.dismiss()`.
-    6.  **Representable Methods:** Implement the required methods in `ImagePicker`:
-        * `makeCoordinator() -> Coordinator`: Return `Coordinator(self)`.
-        * `makeUIViewController(context: Context) -> UIImagePickerController`: Create an instance of `UIImagePickerController`. Set its `delegate` to `context.coordinator`. Check `UIImagePickerController.isSourceTypeAvailable(.camera)` and set `sourceType` accordingly (use `.camera` if available, otherwise `.photoLibrary`). Return the picker instance.
-        * `updateUIViewController(_:context:)`: Leave this empty for the POC.
-    7.  **Connect in ContentView:** Ensure the `.sheet` modifier in `ContentView` presents this `ImagePicker` struct, passing the relevant `@State` variables as bindings:
+    1.  **Create New File:** In Xcode, go to File -> New -> File... Select "Swift File" under the iOS tab. Click Next. Name the file `ImagePicker.swift`. Click Create.
+    2.  **Import Frameworks:** At the top of `ImagePicker.swift`, add:
+        ```swift
+        import SwiftUI
+        import UIKit
+        // Vision will be needed in the next step, import it now
+        import Vision
+        ```
+    3.  **Define ImagePicker Struct:** Create the struct conforming to `UIViewControllerRepresentable`:
+        ```swift
+        struct ImagePicker: UIViewControllerRepresentable {
+            // Bindings to communicate back to ContentView
+            @Binding var selectedImage: UIImage?
+            @Binding var visionResults: [VNRecognizedTextObservation] // Pass this binding now
+
+            // Environment variable to dismiss the sheet
+            @Environment(\.presentationMode) var presentationMode
+
+            // Coordinator handles delegate methods - Defined Next
+            func makeCoordinator() -> Coordinator {
+                Coordinator(self)
+            }
+
+            // Creates the UIImagePickerController - Defined After Coordinator
+            func makeUIViewController(context: Context) -> UIImagePickerController {
+                 // Implementation below
+            }
+
+            // No updates needed from SwiftUI -> UIKit - Defined After makeUIViewController
+            func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+
+            // Coordinator Class (Nested inside ImagePicker struct)
+            class Coordinator: NSObject, UINavigationControllerDelegate, UIImagePickerControllerDelegate {
+                let parent: ImagePicker // Reference to the parent ImagePicker struct
+
+                init(_ parent: ImagePicker) {
+                    self.parent = parent
+                }
+
+                // Delegate: Image was picked
+                func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
+                    print("Image picked") // Debugging
+                    if let uiImage = info[.originalImage] as? UIImage {
+                        // 1. Update the image binding in ContentView
+                        parent.selectedImage = uiImage
+                        // 2. Clear any old Vision results immediately
+                        parent.visionResults = []
+                        // 3. Call the processing function (to be added in Step 3)
+                        parent.processImage(uiImage)
+                    } else {
+                        print("Could not get original image")
+                    }
+                    // 4. Dismiss the picker
+                    parent.presentationMode.wrappedValue.dismiss()
+                }
+
+                // Delegate: Picker was cancelled
+                func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+                    print("Image picker cancelled") // Debugging
+                    parent.presentationMode.wrappedValue.dismiss()
+                }
+            } // End of Coordinator Class
+
+            // Function to Start Vision Processing (Added here, implemented in Step 3)
+            func processImage(_ image: UIImage) {
+                 // Implementation will go here in the next step
+                 print("Placeholder: processImage called. Implement Vision request here.")
+            }
+
+        } // End of ImagePicker Struct
+        ```
+    4.  **Implement `makeUIViewController`:** Add this function *inside* the `ImagePicker` struct (replace the comment above):
+        ```swift
+        func makeUIViewController(context: Context) -> UIImagePickerController {
+            let picker = UIImagePickerController()
+            picker.delegate = context.coordinator // Use the Coordinator for delegates
+            // Check if camera is available on the device
+            if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                 picker.sourceType = .camera
+            } else {
+                 // If no camera (e.g., Simulator), use the photo library
+                 print("Camera not available - using photo library")
+                 picker.sourceType = .photoLibrary
+            }
+            return picker
+        }
+        ```
+    5.  **Implement `updateUIViewController`:** Add this function *inside* the `ImagePicker` struct (replace the comment above):
+        ```swift
+        func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {
+            // Nothing to update in this simple case
+        }
+        ```
+    6.  **Update ContentView:** Go back to `ContentView.swift`. Find the `.sheet` modifier. Replace the placeholder `Text` view with the actual `ImagePicker`, passing the bindings:
         ```swift
         .sheet(isPresented: $showingImagePicker) {
+            // Present the ImagePicker view we just created
             ImagePicker(selectedImage: $capturedImage, visionResults: $visionResults)
         }
         ```
+    7.  **Verification:** Build and run the app (Cmd+R). Tap "Scan Document". The camera interface (or photo library on Simulator) should appear. Take a picture and tap "Use Photo" (or select a photo). The picker should dismiss, and you should see "Image picked" and "Placeholder: processImage called..." in the Xcode console. Cancel the picker; it should dismiss, and you should see "Image picker cancelled". The image area in the UI will *not* update yet. Stop the app.
 
 ---
 
 ### Step 3: Implement Vision Text Recognition Request
 
 * **3.A: Functional Requirements:**
-    * FR3.1: After an image is captured and received (from Step 2), the app must initiate processing.
-    * FR3.2: The app must use the Apple Vision framework to analyze the image for text.
-    * FR3.3: The analysis must identify regions (bounding boxes) containing text.
-    * FR3.4: The analysis must perform OCR to convert the text in those regions into strings.
+    * FR3.1: Initiate Vision framework analysis after an image is confirmed in the picker.
+    * FR3.2: Perform text detection and OCR using `VNRecognizeTextRequest`.
+    * FR3.3: Store the results (observations containing text and boxes) upon completion.
 * **3.B: Non-Functional Requirements:**
-    * NFR3.1: Vision processing must execute on a background thread to prevent blocking the UI.
-    * NFR3.2: The implementation must use `VNRecognizeTextRequest` with the `.accurate` recognition level.
-    * NFR3.3: Basic error handling for the Vision request (e.g., failure to perform, invalid image) must be included.
-    * NFR3.4: Results from the Vision request must be passed back to the main thread for state updates.
+    * NFR3.1: Vision processing must run on a background thread.
+    * NFR3.2: Results must be delivered back to the main thread to update state variables safely.
+    * NFR3.3: Use `.accurate` recognition level.
+    * NFR3.4: Handle potential errors during request creation or performance.
 * **3.C: Technical Design & Implementation:**
-    1.  **Create Processing Function:** Define a function responsible for starting the Vision task. A good place for this in the POC structure is within the `ImagePicker` struct (or its Coordinator, though keeping it in the struct might be slightly simpler to call). Let's call it `processImage(_ image: UIImage)`.
-    2.  **Call Processing Function:** Ensure this `processImage` function is called from the `imagePickerController(_:didFinishPickingMediaWithInfo:)` delegate method *after* setting the `selectedImage` and clearing `visionResults`.
-    3.  **Get CGImage:** Inside `processImage`, safely get the `CGImage` property from the input `UIImage`. If it fails, print an error and return.
-    4.  **Dispatch to Background:** Wrap the Vision request setup and execution in `DispatchQueue.global(qos: .userInitiated).async { ... }`.
-    5.  **Create Request Handler:** Inside the background dispatch block, create a `VNImageRequestHandler(cgImage: cgImage, options: [:])`.
-    6.  **Create Text Request:** Create a `VNRecognizeTextRequest`. Its initializer takes a completion handler `(VNRequest, Error?) -> Void`.
-    7.  **Implement Completion Handler:** Define the code inside the completion handler closure:
-        * **Switch to Main Thread:** Immediately dispatch the result handling back to the main thread: `DispatchQueue.main.async { ... }`.
-        * **Error Check:** Inside the main thread block, check if the `error` parameter is non-nil. If so, print the error and potentially clear the results state variable (`parent.visionResults = []`).
-        * **Process Results:** If no error, safely cast `request.results` to `[VNRecognizedTextObservation]`. Use `guard let observations = ... else { return }`.
-        * **Update State:** Assign these `observations` to the `@Binding` variable (`parent.visionResults = observations`). This will trigger the UI update in `ContentView`.
-    8.  **Configure Request:** Before performing it, set `textRequest.recognitionLevel = .accurate`. Optionally set `textRequest.usesLanguageCorrection = true`.
-    9.  **Perform Request:** Inside the background dispatch block (after creating the request), call `try? requestHandler.perform([textRequest])`. Use `try?` or a `do-catch` block to handle potential errors during the *perform* call itself (and print/handle errors appropriately, dispatching back to main thread if needed).
+    1.  **Locate `processImage` Function:** Open `ImagePicker.swift`. Find the `processImage(_ image: UIImage)` function definition you added at the end of the struct in the previous step.
+    2.  **Implement `processImage`:** Replace the `print(...)` placeholder inside `processImage` with the following implementation:
+        ```swift
+        func processImage(_ image: UIImage) {
+            // 1. Get the CGImage version of the UIImage
+            guard let cgImage = image.cgImage else {
+                print("Error: Failed to get CGImage from UIImage.")
+                // Optionally: Clear results or show an error state via bindings
+                self.visionResults = []
+                return
+            }
+
+            print("Starting Vision processing on background thread...")
+
+            // 2. Dispatch the Vision request to a background thread
+            DispatchQueue.global(qos: .userInitiated).async {
+                // 3. Create a Vision Image Request Handler
+                let requestHandler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+
+                // 4. Create the Text Recognition Request
+                //    The completion handler will be called when Vision processing is done.
+                let textRequest = VNRecognizeTextRequest { (request, error) in
+                    // 5. Switch back to the main thread to process results
+                    DispatchQueue.main.async {
+                        print("Vision processing finished. Processing results on main thread...")
+                        // 6. Handle potential errors from the Vision request itself
+                        if let error = error {
+                            print("Vision Error: \(error.localizedDescription)")
+                            self.visionResults = [] // Clear results on error
+                            return
+                        }
+
+                        // 7. Cast the results to the expected type
+                        guard let observations = request.results as? [VNRecognizedTextObservation] else {
+                            print("Error: Could not cast Vision results to [VNRecognizedTextObservation].")
+                            self.visionResults = []
+                            return
+                        }
+
+                        // 8. Success! Update the binding variable.
+                        //    This will update the @State variable in ContentView.
+                        print("Vision success: Found \(observations.count) text observations.")
+                        self.visionResults = observations
+                    } // End of main thread dispatch
+                } // End of VNRecognizeTextRequest completion handler
+
+                // 9. Configure the request for accuracy
+                textRequest.recognitionLevel = .accurate
+                textRequest.usesLanguageCorrection = true // Optional: improves results usually
+
+                // 10. Perform the request
+                do {
+                    try requestHandler.perform([textRequest])
+                } catch {
+                    // Handle errors that occur when *starting* the request
+                    DispatchQueue.main.async { // Report error on main thread
+                         print("Error: Failed to perform Vision request: \(error.localizedDescription)")
+                         self.visionResults = [] // Clear results on error
+                    }
+                }
+            } // End of background thread dispatch
+        } // End of processImage function
+        ```
+    3.  **Verification:** Build and run the app (Cmd+R). Tap "Scan Document", take/select a picture containing some clear text. After the picker dismisses, check the Xcode console. You should see messages like:
+        * "Image picked"
+        * "Starting Vision processing on background thread..."
+        * "Vision processing finished. Processing results on main thread..."
+        * "Vision success: Found X text observations." (where X > 0 if text was found).
+        The UI will *still* not show the image or the text results yet, but the processing is happening. Stop the app.
 
 ---
 
 ### Step 4: Store and Prepare Vision Results for Display
 
 * **4.A: Functional Requirements:**
-    * FR4.1: The app must store the results obtained from the Vision framework (`VNRecognizeTextRequest`).
-    * FR4.2: The stored results must include both the recognized text strings and their corresponding bounding box information.
+    * FR4.1: Ensure the `[VNRecognizedTextObservation]` results from Vision are correctly stored in the state variable used by `ContentView`.
 * **4.B: Non-Functional Requirements:**
-    * NFR4.1: The results must be stored in `@State` variables in `ContentView` so that UI updates automatically when the data changes.
-    * NFR4.2: The data structure used should be the `VNRecognizedTextObservation` itself, as it conveniently contains both bounding box and text candidates.
+    * NFR4.1: The storage mechanism must use SwiftUI's state management (`@State` via `@Binding`) to trigger automatic UI updates.
 * **4.C: Technical Design & Implementation:**
-    1.  **State Variable:** Confirm that the `@State private var visionResults: [VNRecognizedTextObservation] = []` variable exists in `ContentView`.
-    2.  **Binding:** Confirm that this state variable is passed as a `@Binding` to the `ImagePicker` struct.
-    3.  **Update in Completion Handler:** In Step 3.C.7 (the Vision request completion handler, running on the main thread), the line `self.visionResults = observations` (or `parent.visionResults = observations` if implemented inside `ImagePicker`) correctly assigns the full results array to the state variable. No further processing is needed in *this* step; the raw observations are stored.
+    1.  **Confirm State Variable:** In `ContentView.swift`, verify the `@State` variable exists:
+        ```swift
+        @State private var visionResults: [VNRecognizedTextObservation] = []
+        ```
+    2.  **Confirm Binding:** In `ContentView.swift`, verify the `.sheet` modifier passes this state variable using a binding (`$`) to `ImagePicker`:
+        ```swift
+        .sheet(isPresented: $showingImagePicker) {
+            ImagePicker(selectedImage: $capturedImage, visionResults: $visionResults) // Ensure $visionResults is here
+        }
+        ```
+    3.  **Confirm Binding Declaration:** In `ImagePicker.swift`, verify the `@Binding` property exists:
+        ```swift
+        @Binding var visionResults: [VNRecognizedTextObservation]
+        ```
+    4.  **Confirm State Update:** In `ImagePicker.swift`, inside the `processImage` function's completion handler (within the `DispatchQueue.main.async` block), verify the line that updates the state via the binding:
+        ```swift
+        self.visionResults = observations // This updates the @State in ContentView
+        ```
+    5.  **Verification:** No new code is written in this step; it's about confirming the connections made previously. Run the app, scan an image with text, and check the console log for the "Vision success: Found X text observations" message. Add a temporary debug `Text` view inside `ContentView`'s body like `Text("Observations: \(visionResults.count)")` to visually confirm the count updates after scanning. Remove the temporary `Text` view afterwards. Stop the app.
 
 ---
 
 ### Step 5: Display Extracted Text Results
 
 * **5.A: Functional Requirements:**
-    * FR5.1: The app must display the text strings extracted during the OCR process (Step 3).
-    * FR5.2: Each recognized text block/line should appear as a distinct item in the UI.
-    * FR5.3: Placeholder text should indicate states like "Processing...", "No text found", or "Scan an image".
+    * FR5.1: The UI must display the text strings derived from the stored `visionResults`.
+    * FR5.2: Each distinct text observation should result in a separate displayed text item.
 * **5.B: Non-Functional Requirements:**
-    * NFR5.1: The display must update automatically when the `visionResults` state variable changes.
-    * NFR5.2: The text should be presented in a readable format (e.g., a list).
+    * NFR5.1: The text display area must update automatically when `visionResults` changes.
+    * NFR5.2: Text should be presented clearly, for example, in a list format.
 * **5.C: Technical Design & Implementation:**
-    1.  **Locate UI Area:** Go to the `List` or `VStack` designated for text results in `ContentView.swift`.
-    2.  **Conditional Content:** Use `if/else if/else` logic based on `capturedImage` and `visionResults` state:
-        * If `capturedImage != nil` and `visionResults.isEmpty`: Show "Processing or no text found...".
-        * If `capturedImage == nil`: Show "No image scanned yet." or similar.
-        * Else (`capturedImage != nil` and `visionResults` is not empty): Proceed to iterate.
-    3.  **Iterate Results:** Use `ForEach(visionResults, id: \.uuid) { observation in ... }` to loop through the stored observations. The `\.uuid` makes each observation uniquely identifiable for the loop.
-    4.  **Extract & Display Text:** Inside the `ForEach` loop, access the best text candidate: `observation.topCandidates(1).first?.string`. Use the nil-coalescing operator `??` to provide a fallback string like `"Error reading text"` in case `topCandidates` is empty. Display this string using a standard `Text` view.
-    5.  **Structure (Optional):** If using a `List`, `ForEach` works directly. If using a `VStack`, ensure it's potentially wrapped in a `ScrollView` if many text results are expected.
+    1.  **Locate Text Display Area:** In `ContentView.swift`, find the `List` designated for displaying text results (created in Step 1).
+    2.  **Implement Conditional Logic & Iteration:** Replace the placeholder `Text` inside the `Section("Extracted Text:") { ... }` block with the following logic:
+        ```swift
+        Section("Extracted Text:") {
+            // Check if an image has been processed but no results found
+            if visionResults.isEmpty && capturedImage != nil {
+                 Text("Processing complete. No text found.")
+                    .foregroundColor(.gray)
+            // Check if no image has been scanned yet
+            } else if visionResults.isEmpty && capturedImage == nil {
+                 Text("Scan an image to view extracted text.")
+                    .foregroundColor(.gray)
+            // Otherwise, display the results found
+            } else {
+                 // Iterate over each observation found by Vision
+                 ForEach(visionResults, id: \.uuid) { observation in
+                     // Get the most confident text recognition result
+                     let recognizedText = observation.topCandidates(1).first?.string ?? "Unable to read text"
+                     // Display it
+                     Text(recognizedText)
+                 }
+            }
+        }
+        ```
+    3.  **Verification:** Build and run the app (Cmd+R). Tap "Scan Document", take/select a picture containing text. After the picker dismisses and processing completes (may take a second), the "Extracted Text" list should automatically populate with the text found in the image. If no text is found, it should indicate that. Stop the app.
 
 ---
 
 ### Step 6: Display Bounding Box Overlays
 
 * **6.A: Functional Requirements:**
-    * FR6.1: The app must draw rectangles (bounding boxes) over the displayed captured image.
-    * FR6.2: Each rectangle must correspond visually to the location and size of a text region detected by the Vision framework.
+    * FR6.1: Draw rectangular boxes overlaid on the displayed `capturedImage`.
+    * FR6.2: Each box must visually correspond to the location and size of a `VNRecognizedTextObservation`'s `boundingBox`.
 * **6.B: Non-Functional Requirements:**
-    * NFR6.1: The bounding boxes must be displayed only when an image has been captured and processed.
-    * NFR6.2: The coordinate calculation for the boxes must correctly translate Vision's normalized, bottom-left origin coordinates to the SwiftUI view's top-left origin, point-based coordinate system.
-    * NFR6.3: The boxes should be visually distinct (e.g., red stroke).
+    * NFR6.1: Boxes must only appear when `visionResults` contains observations.
+    * NFR6.2: Coordinate calculations must accurately map Vision's normalized, bottom-left origin system to SwiftUI's top-left, point-based system within the displayed image's frame.
+    * NFR6.3: Boxes should be styled for visibility (e.g., red outline).
 * **6.C: Technical Design & Implementation:**
-    1.  **Create Overlay View:** Create a new SwiftUI `View` struct named `BoundingBoxOverlay`.
-    2.  **Input Properties:** Give it `let observations: [VNRecognizedTextObservation]` and `let imageSize: CGSize` properties. `imageSize` is needed if the `Image` view uses `.scaledToFill` and you need the original aspect ratio for scaling calculations, but for `.scaledToFit` used here, the `GeometryReader` size is often sufficient for calculations *within that fitted view*. Let's simplify and primarily use `GeometryReader`'s size for now. (Add `imageSize` property if aspect ratio correction becomes necessary later).
+    1.  **Create Overlay File:** In Xcode, go to File -> New -> File... Select "SwiftUI View" under the User Interface tab. Click Next. Name the file `BoundingBoxOverlay.swift`. Click Create.
+    2.  **Define Overlay Struct:** Open `BoundingBoxOverlay.swift`. Replace its contents with:
         ```swift
+        import SwiftUI
+        import Vision // Need Vision types
+
         struct BoundingBoxOverlay: View {
+            // Input: The observations containing bounding boxes
             let observations: [VNRecognizedTextObservation]
-            // let imageSize: CGSize // Keep if needed later
+            // Removed imageSize for POC simplicity, rely on GeometryReader
 
-            var body: some View { ... }
-        }
-        ```
-    3.  **Use GeometryReader:** Wrap the content of the `BoundingBoxOverlay`'s `body` in a `GeometryReader { geometry in ... }`. This provides the `geometry.size` (the actual size available for drawing the overlay).
-    4.  **Iterate Observations:** Inside the `GeometryReader`, use `ForEach(observations, id: \.uuid) { observation in ... }`.
-    5.  **Get Normalized Box:** Inside the loop, get `let boundingBox = observation.boundingBox`. This is a `CGRect` with values between 0.0 and 1.0, and its origin `y` is from the bottom edge.
-    6.  **Coordinate Conversion:** Calculate the rectangle's frame in the `GeometryReader`'s coordinate space (top-left origin):
-        ```swift
-        let viewWidth = geometry.size.width
-        let viewHeight = geometry.size.height
+            var body: some View {
+                // GeometryReader gives the size of the space available for the overlay
+                GeometryReader { geometry in
+                    // Loop through each observation to draw its box
+                    ForEach(observations, id: \.uuid) { observation in
+                        // Get the normalized bounding box (0-1 range) from Vision
+                        let visionBoundingBox = observation.boundingBox
 
-        // Vision's Y is from bottom, SwiftUI's Y is from top
-        let yPosition = (1.0 - boundingBox.origin.y - boundingBox.height) * viewHeight
+                        // Convert Vision's coordinates (origin at bottom-left)
+                        // to SwiftUI's coordinates (origin at top-left)
+                        // inside the geometry reader's frame size.
 
-        let rect = CGRect(
-            x: boundingBox.origin.x * viewWidth,
-            y: yPosition,
-            width: boundingBox.width * viewWidth,
-            height: boundingBox.height * viewHeight
-        )
+                        let viewWidth = geometry.size.width
+                        let viewHeight = geometry.size.height
+
+                        // Calculate the top-left corner's Y coordinate
+                        // Vision's Y starts from the bottom, SwiftUI's from the top.
+                        let yCoordinate = (1.0 - visionBoundingBox.origin.y - visionBoundingBox.height) * viewHeight
+
+                        // Calculate the frame for the SwiftUI rectangle
+                        let boundingBoxRect = CGRect(
+                            x: visionBoundingBox.origin.x * viewWidth,
+                            y: yCoordinate,
+                            width: visionBoundingBox.width * viewWidth,
+                            height: visionBoundingBox.height * viewHeight
+                        )
+
+                        // Draw the rectangle shape using the calculated frame
+                        Rectangle()
+                            .path(in: boundingBoxRect) // Create path from CGRect
+                            .stroke(Color.red, lineWidth: 2) // Style with a red border
+                    }
+                } // End of GeometryReader
+            } // End of body
+        } // End of struct
         ```
-    7.  **Draw Rectangle:** Use the calculated `rect` to draw the box:
+    3.  **Apply Overlay in ContentView:** Open `ContentView.swift`. Find the `Image(uiImage: image)` line within the `if let image = capturedImage` block. Add the `.overlay(...)` modifier *after* the `.scaledToFit()` modifier:
         ```swift
-        Rectangle()
-            .path(in: rect) // Use path(in:) for CGRect drawing
-            .stroke(Color.red, lineWidth: 2) // Style the box
+        if let image = capturedImage {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+                // Add the overlay here, passing the visionResults
+                .overlay(BoundingBoxOverlay(observations: visionResults))
+        } else { ... }
         ```
-    8.  **Apply Overlay in ContentView:** Go back to `ContentView.swift`. Find the `Image(uiImage: image)` view. Add the `.overlay(...)` modifier:
-        ```swift
-        Image(uiImage: image)
-            .resizable()
-            .scaledToFit()
-            .overlay(BoundingBoxOverlay(observations: visionResults)) // Pass the results
-        ```
-        *(Note: Removed imageSize passing for simplicity, relying on GeometryReader within the overlay)*.
+    4.  **Verification:** Build and run the app (Cmd+R). Scan an image containing text. After processing, you should now see both the image displayed, the extracted text listed below it, *and* red rectangles drawn directly on top of the image, outlining the areas where the text was detected. Test with images where text is in different locations. Stop the app.
