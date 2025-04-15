@@ -7,33 +7,41 @@
 //
 
 import SwiftUI
-import Vision // Keep Vision import
+import Vision // Use Vision framework
 import CoreGraphics // Import for CGImagePropertyOrientation
+
+// Ensure Deployment Target is iOS 18.0+ for this API
 
 struct ContentView: View {
 
     // MARK: - State Variables
     @State private var showCamera = false
     @State private var capturedImage: UIImage? = nil
-    @State private var visionResults: [VNRecognizedTextObservation] = []
+    // Use the new Observation struct type (Assumption: It exists and has needed props)
+    @State private var visionResults: [RecognizedTextObservation] = []
     @State private var isProcessing = false
+    // Classification state removed
 
     // MARK: - Body
     var body: some View {
         NavigationView {
             VStack {
-                // --- Conditional View: Welcome OR Results ---
+                // Conditional View: Welcome OR Results
                 if capturedImage == nil {
-                    WelcomeView(showCamera: $showCamera, capturedImage: $capturedImage, visionResults: $visionResults)
+                    WelcomeView(
+                        showCamera: $showCamera,
+                        capturedImage: $capturedImage,
+                        visionResults: $visionResults
+                    )
                 } else {
                     ResultsView(
                         capturedImage: $capturedImage,
                         visionResults: $visionResults,
                         isProcessing: $isProcessing,
-                        showCamera: $showCamera // Pass showCamera binding for "Scan New"
+                        showCamera: $showCamera
                     )
                 }
-            } // End main VStack
+            }
             .navigationTitle(capturedImage == nil ? "Welcome" : "Scan Results")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -44,15 +52,26 @@ struct ContentView: View {
                         }
                     }
                 }
-            } // End Toolbar
+            }
             .fullScreenCover(isPresented: $showCamera) {
                 ImagePicker(selectedImage: $capturedImage)
             }
-            .onChange(of: capturedImage) { _ , newImage in // iOS 17+ signature
+            .onChange(of: capturedImage) { _, newImage in // iOS 17+ signature
                 if let image = newImage {
-                    print("onChange detected new image. Setting isProcessing=true.")
-                    isProcessing = true
-                    performVisionRequest(on: image) // Call the updated function
+                    print("onChange detected new image. Launching processing Task.")
+                    // Launch Swift Concurrency Task to handle async work
+                    Task {
+                        // Set processing state ON the Main Actor before starting async work
+                        await MainActor.run {
+                            isProcessing = true
+                        }
+                        // Call the async function
+                        await performVisionRequest(on: image)
+                        // Set processing state OFF on the Main Actor after async work finishes
+                        await MainActor.run {
+                            isProcessing = false
+                        }
+                    }
                 } else {
                     print("onChange detected image became nil (likely reset).")
                 }
@@ -61,7 +80,8 @@ struct ContentView: View {
                 if isProcessing {
                     ProcessingIndicatorView()
                 }
-            } // End overlay
+            }
+
         } // End NavigationView
         .navigationViewStyle(.stack)
     } // End body
@@ -72,102 +92,78 @@ struct ContentView: View {
         print("Resetting scan state.")
         self.capturedImage = nil
         self.visionResults = []
-        // Decide if you want to immediately show camera after reset:
-        // self.showCamera = true
     }
 
-    // MARK: - Vision Processing Function (UPDATED)
+    // MARK: - Vision Processing Function (Using NEW Swift-only API - CORRECTED)
 
-    /// Performs text recognition on the provided image, now handling orientation.
-    private func performVisionRequest(on image: UIImage) {
+    /// Performs text recognition using the new Vision API (`RecognizeTextRequest`).
+    @MainActor // Ensure state updates run on the main actor
+    private func performVisionRequest(on image: UIImage) async { // Function is async
         guard let cgImage = image.cgImage else {
             print("Error: Failed to get CGImage from input UIImage.")
-            DispatchQueue.main.async { isProcessing = false }
+            // isProcessing is set false by the calling Task
             return
         }
 
-        // --- ORIENTATION HANDLING START ---
-        // 1. Log the original UIImage orientation
-        print("DEBUG: UIImage Orientation raw value: \(image.imageOrientation.rawValue)")
-
-        // 2. Convert UIImage.Orientation to CGImagePropertyOrientation
         let imageOrientation = cgOrientation(from: image.imageOrientation)
-        print("DEBUG: Converted to CGImagePropertyOrientation: \(imageOrientation.rawValue)")
-        // --- ORIENTATION HANDLING END ---
+        print("DEBUG: Using CGImagePropertyOrientation: \(imageOrientation.rawValue)")
+
+        print("Starting Vision Text Recognition (New API)...")
+
+        // --- Prepare Text Recognition Request ---
+        // 1. Create the request struct using VAR to allow modification
+        var textRequest = RecognizeTextRequest() // <-- Changed LET to VAR
+
+        // 2. Configure optional properties on the mutable struct instance
+        textRequest.recognitionLevel = .accurate // Now assignable
+        textRequest.usesLanguageCorrection = true // Now assignable
+        // --- End Request Setup ---
 
 
-        print("Starting Vision processing on background thread...")
-        DispatchQueue.global(qos: .userInitiated).async {
-            // --- MODIFIED HANDLER INIT ---
-            // 3. Create handler WITH the determined orientation
-            let requestHandler = VNImageRequestHandler(
-                cgImage: cgImage,
-                orientation: imageOrientation, // Pass the correct orientation
-                options: [:]
+        // --- Perform Request using async/await ---
+        do {
+            // 3. Call perform() DIRECTLY on the request struct instance.
+            //    No separate VNImageRequestHandler object is needed for this API pattern.
+            print("Performing RecognizeTextRequest directly...")
+            let results: [RecognizedTextObservation] = try await textRequest.perform(
+                on: cgImage,
+                orientation: imageOrientation
             )
-            // --- END MODIFIED HANDLER INIT ---
 
-            let textRequest = VNRecognizeTextRequest { (request, error) in
-                DispatchQueue.main.async {
-                    print("Vision processing finished. Handling results on main thread...")
-                    isProcessing = false
-                    if let error = error {
-                        print("Vision Error: \(error.localizedDescription)")
-                        self.visionResults = []
-                        return
-                    }
-                    guard let observations = request.results as? [VNRecognizedTextObservation] else {
-                        print("Error: Could not cast Vision results.")
-                        self.visionResults = []
-                        return
-                    }
-                    print("Vision success: Found \(observations.count) text observations.")
-                    self.visionResults = observations
-                }
-            }
-            textRequest.recognitionLevel = .accurate
-            textRequest.usesLanguageCorrection = true
-            do {
-                try requestHandler.perform([textRequest])
-            } catch {
-                DispatchQueue.main.async {
-                    print("Error: Failed to perform Vision request: \(error.localizedDescription)")
-                    self.visionResults = []
-                    isProcessing = false
-                }
-            }
-        } // End background thread dispatch
+            // 4. Success: Update state directly (we are already on @MainActor)
+            print("OCR success: Found \(results.count) observations.")
+            self.visionResults = results
+
+        } catch {
+            // 5. Handle errors performing the request
+            print("Error: Failed to perform Vision request: \(error.localizedDescription)")
+            self.visionResults = [] // Clear results on error
+        }
+        // --- End Perform Request ---
+
+        // isProcessing = false is handled by the calling Task after await returns/throws
+        print("Vision processing function finished.")
     } // End performVisionRequest
 
-    // MARK: - Orientation Helper (NEW)
 
-    /// Converts UIImage.Orientation to the corresponding CGImagePropertyOrientation required by Vision framework.
-    /// - Parameter uiOrientation: The UIImage.Orientation value.
-    /// - Returns: The equivalent CGImagePropertyOrientation value.
+    // --- Orientation Helper (Unchanged) ---
     private func cgOrientation(from uiOrientation: UIImage.Orientation) -> CGImagePropertyOrientation {
-        switch uiOrientation {
-            case .up: return .up
-            case .down: return .down
-            case .left: return .left
-            case .right: return .right
-            case .upMirrored: return .upMirrored
-            case .downMirrored: return .downMirrored
-            case .leftMirrored: return .leftMirrored
-            case .rightMirrored: return .rightMirrored
-            @unknown default:
-                print("Warning: Unknown UIImage.Orientation encountered (\(uiOrientation.rawValue)), defaulting to .up")
-                return .up // Default orientation
-        }
+         switch uiOrientation {
+            case .up: return .up; case .down: return .down; case .left: return .left; case .right: return .right
+            case .upMirrored: return .upMirrored; case .downMirrored: return .downMirrored; case .leftMirrored: return .leftMirrored; case .rightMirrored: return .rightMirrored
+            @unknown default: print("Warning: Unknown UIImage.Orientation (\(uiOrientation.rawValue)), defaulting to .up"); return .up
+         }
     }
 
 } // End ContentView
 
-// MARK: - Subviews (Unchanged from previous step)
+// MARK: - Subviews (Bindings Updated)
 
 struct WelcomeView: View {
+    // Only needs bindings relevant to resetting state and showing camera
     @Binding var showCamera: Bool
     @Binding var capturedImage: UIImage?
-    @Binding var visionResults: [VNRecognizedTextObservation]
+    @Binding var visionResults: [RecognizedTextObservation] // Use NEW type
 
     var body: some View {
         VStack {
@@ -176,6 +172,7 @@ struct WelcomeView: View {
             Text("Tap 'Start Scan' to capture an image and extract text.").font(.body).foregroundColor(.secondary).multilineTextAlignment(.center).padding([.leading, .trailing])
             Spacer()
             Button("Start Scan") {
+                // Reset relevant states
                 self.capturedImage = nil
                 self.visionResults = []
                 self.showCamera = true
@@ -187,19 +184,23 @@ struct WelcomeView: View {
 }
 
 struct ResultsView: View {
+    // Only needs bindings relevant to displaying results
     @Binding var capturedImage: UIImage?
-    @Binding var visionResults: [VNRecognizedTextObservation]
-    @Binding var isProcessing: Bool
-    @Binding var showCamera: Bool // Although not directly used, passed for consistency perhaps
+    @Binding var visionResults: [RecognizedTextObservation] // Use NEW type
+    @Binding var isProcessing: Bool // Needed to show correct list state
+    @Binding var showCamera: Bool // Passed through but not used directly
 
     var body: some View {
         VStack {
+            // Classification Text removed
+
             ZStack {
                 if let image = capturedImage {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFit()
-                        .overlay(BoundingBoxOverlay(observations: visionResults)) // Apply overlay
+                        // Ensure BoundingBoxOverlay uses the new observation type
+                        .overlay(BoundingBoxOverlay(observations: visionResults))
                 } else {
                     Text("Error displaying image.")
                 }
@@ -213,12 +214,13 @@ struct ResultsView: View {
                     if visionResults.isEmpty && !isProcessing {
                          Text("Processing complete. No text found.")
                             .foregroundColor(.gray)
-                    } else if isProcessing {
-                         Text("Processing...") // Should be covered by overlay
+                    } else if isProcessing { // Should be covered by overlay
+                         Text("Processing...")
                             .foregroundColor(.gray)
                     } else {
-                         ForEach(visionResults, id: \.uuid) { observation in
-                             Text(observation.topCandidates(1).first?.string ?? "Error reading text")
+                         ForEach(visionResults, id: \.uuid) { observation in // Assumes .uuid exists
+                             // Assumes .topCandidates exists on new type
+                             Text(observation.topCandidates(1).first?.string ?? "Read Error")
                          }
                     }
                 }
@@ -228,8 +230,9 @@ struct ResultsView: View {
     }
 }
 
+// ProcessingIndicatorView remains the same
 struct ProcessingIndicatorView: View {
-    var body: some View {
+     var body: some View {
         ZStack {
             Color(white: 0, opacity: 0.5).edgesIgnoringSafeArea(.all)
             ProgressView("Processing...")
