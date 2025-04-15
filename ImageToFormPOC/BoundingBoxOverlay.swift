@@ -9,18 +9,14 @@
 import SwiftUI
 import Vision // Needs Vision framework types
 
-// *** TYPE CHANGE HERE ***
-// Input is now an array of the NEW observation struct
 struct BoundingBoxOverlay: View {
-    let observations: [RecognizedTextObservation] // Use NEW type
+    // Input: Use the NEW Observation Type
+    let observations: [RecognizedTextObservation]
 
     var body: some View {
         GeometryReader { geometry in
-            ForEach(observations, id: \.uuid) { observation in // Assuming new type has uuid
-                // *** ASSUMPTION HERE ***
-                // Assuming new RecognizedTextObservation struct still has 'boundingBox'
-                // with the same normalized coordinate system (0-1, bottom-left origin).
-                // If not, this calculation needs adjustment based on actual properties.
+            ForEach(observations, id: \.uuid) { observation in // Assumes .uuid
+                // Assuming .boundingBox exists and is compatible
                 let visionBoundingBox = observation.boundingBox
 
                 let viewWidth = geometry.size.width
@@ -39,7 +35,7 @@ struct BoundingBoxOverlay: View {
             }
         } // End GeometryReader
     } // End body
-} // End struct
+}
 
 // MARK: - Preview (Optional)
 #Preview {

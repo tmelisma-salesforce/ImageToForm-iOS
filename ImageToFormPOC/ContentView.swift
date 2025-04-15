@@ -7,88 +7,109 @@
 //
 
 import SwiftUI
-import Vision // Use Vision framework
-import CoreML  // Import CoreML for loading the model
-import CoreGraphics // For CGImagePropertyOrientation
+import Vision
+import CoreML
+import CoreGraphics
 
-// Ensure Deployment Target is iOS 18.0+ for this API
+// Ensure Deployment Target is iOS 18.0+
 
 struct ContentView: View {
 
     // MARK: - State Variables
     @State private var showCamera = false
     @State private var capturedImage: UIImage? = nil
-    @State private var visionResults: [RecognizedTextObservation] = [] // NEW Observation Type
+    @State private var visionResults: [RecognizedTextObservation] = []
     @State private var isProcessing = false
-    @State private var classificationLabel: String = "" // State for classification
+    @State private var classificationLabel: String = ""
+    @State private var showingClassificationAlert = false
+    @State private var classificationAlertMessage = ""
 
-    // MARK: - Body
+    // Define allowed classification identifiers
+    private let allowedClassifications: Set<String> = [
+        "binder", "ring-binder", "menu", "envelope", "letter",
+        "document", "paper", "text", "label"
+    ]
+
+    // MARK: - Main Body
     var body: some View {
         NavigationView {
-            VStack {
-                // Conditionally show Welcome OR Results
-                if capturedImage == nil {
-                    WelcomeView(
-                        showCamera: $showCamera,
-                        capturedImage: $capturedImage,
-                        visionResults: $visionResults,
-                        classificationLabel: $classificationLabel // Pass binding
-                    )
-                } else {
-                    ResultsView(
-                        capturedImage: $capturedImage,
-                        visionResults: $visionResults,
-                        isProcessing: $isProcessing,
-                        showCamera: $showCamera, // Still needed for potential reset logic within ResultsView if refactored
-                        classificationLabel: $classificationLabel // Pass binding
-                    )
-                }
-            }
-            .navigationTitle(capturedImage == nil ? "Welcome" : "Scan Results")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                if capturedImage != nil {
-                    ToolbarItem(placement: .navigationBarLeading) {
-                        Button("Scan New") {
-                            resetScan()
+            mainContent // Use extracted view
+                .navigationTitle(capturedImage == nil ? "Welcome" : "Scan Results")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    if capturedImage != nil {
+                        ToolbarItem(placement: .navigationBarLeading) {
+                            Button("Scan New") {
+                                resetScan()
+                            }
                         }
                     }
                 }
-            }
-            .fullScreenCover(isPresented: $showCamera) {
-                // ImagePicker returns the selected UIImage via the binding
-                ImagePicker(selectedImage: $capturedImage)
-            }
-            .onChange(of: capturedImage) { _, newImage in // iOS 17+ signature
-                if let image = newImage {
-                    print("onChange detected new image. Launching processing Task.")
-                    // Launch Swift Concurrency Task to handle async Vision work
-                    Task {
-                        // Set processing state ON the Main Actor before starting
-                        await MainActor.run { isProcessing = true }
-                        // Perform the combined async Vision requests
-                        await performVisionRequests(on: image)
-                        // Set processing state OFF on the Main Actor after finishing
-                        await MainActor.run { isProcessing = false }
+                .fullScreenCover(isPresented: $showCamera) {
+                    ImagePicker(selectedImage: $capturedImage)
+                }
+                .onChange(of: capturedImage) { _, newImage in
+                    if let image = newImage {
+                        print("onChange detected new image. Launching processing Task.")
+                        Task {
+                            await MainActor.run { isProcessing = true }
+                            await performVisionRequests(on: image)
+                            // isProcessing is set false inside performVisionRequests now
+                        }
+                    } else {
+                        print("onChange detected image became nil (likely reset).")
                     }
-                } else {
-                    print("onChange detected image became nil (likely reset).")
                 }
-            }
-            .overlay {
-                // Show processing indicator while busy
-                if isProcessing {
-                    ProcessingIndicatorView()
+                .overlay {
+                    if isProcessing {
+                        ProcessingIndicatorView()
+                    }
                 }
-            }
-
-        } // End NavigationView
+                .alert("Classification Result", isPresented: $showingClassificationAlert) {
+                    Button("OK") { }
+                } message: {
+                    Text(classificationAlertMessage)
+                }
+        }
         .navigationViewStyle(.stack)
-    } // End body
+    }
 
-    // MARK: - Helper Functions
+    // MARK: - Extracted Main Content View (UPDATED CALL to ResultsView)
+    @ViewBuilder
+    private var mainContent: some View {
+        VStack {
+            if capturedImage == nil {
+                WelcomeView(
+                    showCamera: $showCamera,
+                    capturedImage: $capturedImage,
+                    visionResults: $visionResults,
+                    classificationLabel: $classificationLabel
+                )
+            } else {
+                // *** REMOVED showCamera argument from this call ***
+                ResultsView(
+                    capturedImage: $capturedImage,
+                    visionResults: $visionResults,
+                    isProcessing: $isProcessing,
+                    classificationLabel: $classificationLabel
+                )
+            }
+        }
+    }
 
-    /// Resets state for a new scan.
+    // MARK: - Helper Functions (Unchanged from previous step)
+    // resetScan()
+    // performVisionRequests()
+    // performClassification()
+    // performOCR()
+    // cgOrientation()
+    // ... (keep the full implementations of these functions as provided before) ...
+
+    // NOTE: For brevity, the helper functions are not repeated here,
+    // but ensure they remain exactly as provided in the previous response.
+    // Specifically, keep the full 'performVisionRequests' and its helper async functions.
+
+    /// Resets state variables for a new scan.
     private func resetScan() {
         print("Resetting scan state.")
         self.capturedImage = nil
@@ -96,226 +117,131 @@ struct ContentView: View {
         self.classificationLabel = "" // Reset classification
     }
 
-    // MARK: - Vision Processing Function (NEW API - async/await, Classification + OCR)
-
     /// Performs Image Classification (ResNet50) and Text Recognition using the new async Vision API.
-    @MainActor // Ensures state updates run safely on the main actor
+    @MainActor
     private func performVisionRequests(on image: UIImage) async {
         guard let cgImage = image.cgImage else {
             print("Error: Failed to get CGImage from input UIImage.")
-            // isProcessing handled by calling Task
+            isProcessing = false // Ensure indicator stops
             return
         }
 
-        // Determine image orientation for Vision requests
         let imageOrientation = cgOrientation(from: image.imageOrientation)
         print("DEBUG: Using CGImagePropertyOrientation: \(imageOrientation.rawValue)")
-
         print("Starting Vision processing (Classification + OCR - New API)...")
 
-        // --- Prepare Classification Request using ResNet50 ---
-        let classificationRequest: CoreMLRequest // Use the new struct type
+        self.visionResults = []
+        self.classificationLabel = ""
+
+        let classificationRequest: CoreMLRequest
         do {
-            // Load the MLModel (use non-deprecated init)
             let coreMLModel = try Resnet50(configuration: MLModelConfiguration()).model
-            // Create the container required by CoreMLRequest
             let container = try CoreMLModelContainer(model: coreMLModel, featureProvider: nil)
-            // Create the CoreMLRequest using the container
             classificationRequest = CoreMLRequest(model: container)
             print("DEBUG: ResNet50 model loaded and CoreMLRequest created.")
         } catch {
             print("Error preparing classification request: \(error)")
-            self.classificationLabel = "Model Init Error"
-            // Allow OCR to proceed even if classification fails to init
-            // but we need a placeholder; alternatively, return here.
-            // For now, let OCR run. A real app might handle this better.
-             // We need to exit or handle the lack of a valid classificationRequest
-             self.visionResults = [] // Clear OCR results too if we bail early
-             print("Cannot proceed without classification model.")
-             return // Exit if model/container fails
+            self.classificationLabel = "Model Load Error"
+            isProcessing = false
+            return
         }
-        // --- End Classification Request Prep ---
 
-
-        // --- Prepare Text Recognition Request ---
-        var textRequest = RecognizeTextRequest() // Use the new struct type, make it VAR
+        var textRequest = RecognizeTextRequest()
         textRequest.recognitionLevel = .accurate
         textRequest.usesLanguageCorrection = true
-        // --- End Text Recognition Request Prep ---
 
+        var classificationOutcome: String? = nil
+        var classificationError: Error? = nil
+        var ocrError: Error? = nil
 
-        // --- Perform Both Requests Concurrently using async let ---
         do {
             print("Performing Classification and Text requests concurrently...")
-
-            // Start both requests asynchronously
-            async let classificationTask: () = performClassification(request: classificationRequest, on: cgImage, orientation: imageOrientation)
-            async let ocrTask: () = performOCR(request: textRequest, on: cgImage, orientation: imageOrientation)
-
-            // Wait for both tasks to complete
-            _ = try await [classificationTask, ocrTask] // Wait for both, ignore void results
-
+            async let classificationTask: () = performClassification(request: classificationRequest, on: cgImage, orientation: imageOrientation, label: &classificationOutcome, error: &classificationError)
+            async let ocrTask: () = performOCR(request: textRequest, on: cgImage, orientation: imageOrientation, error: &ocrError)
+            _ = try await [classificationTask, ocrTask]
             print("Both Vision tasks completed.")
-
         } catch {
-            // Catch errors specifically from the requestHandler.perform calls if they throw
-            // or errors re-thrown from the helper async functions
-            print("Error performing Vision requests: \(error.localizedDescription)")
-            // Set error states if desired
-            self.classificationLabel = "Processing Error"
-            self.visionResults = []
+            print("Error performing Vision requests group: \(error.localizedDescription)")
+            if classificationOutcome == nil { classificationLabel = "Processing Error" }
+            if visionResults.isEmpty { self.visionResults = [] }
         }
-        // --- End Perform Requests ---
 
-        // isProcessing = false is handled by the calling Task after this function returns/throws
-        print("Vision processing function finished.")
+        // Validation Logic
+        if let error = classificationError {
+             print("Classification task failed with error: \(error.localizedDescription)")
+             self.classificationLabel = "Classification Error"
+        } else if let label = classificationOutcome {
+            let topIdentifier = label.components(separatedBy: " (").first ?? label
+            print("Top classification identifier: \(topIdentifier)")
+            if allowedClassifications.contains(topIdentifier.lowercased()) {
+                print("Classification SUCCESS: '\(topIdentifier)' is in the allowed list.")
+                self.classificationLabel = label
+            } else {
+                print("Classification REJECTED: '\(topIdentifier)' is not in allowed list.")
+                self.classificationLabel = "Incorrect Item (\(topIdentifier))"
+                self.classificationAlertMessage = "I'm sorry but that doesn't look like an expected document. That looks like a '\(topIdentifier)'."
+                self.showingClassificationAlert = true
+            }
+        } else {
+             print("Classification produced no identifiable result.")
+             self.classificationLabel = "Classification Failed"
+        }
+
+        if let error = ocrError {
+            print("OCR task failed with error: \(error.localizedDescription)")
+        }
+
+        print("Setting isProcessing = false")
+        isProcessing = false // Hide indicator now
+
     } // End performVisionRequests
 
-
-    // --- Async Helper for Classification (REVISED) ---
-        @MainActor
-        private func performClassification(request: CoreMLRequest, on cgImage: CGImage, orientation: CGImagePropertyOrientation) async throws {
-            // 1. Perform the request, getting the generic result type
-            let observations: [any VisionObservation] = try await request.perform(on: cgImage, orientation: orientation) // Result is Array<any VisionObservation>
-
-            // 2. Filter and cast the results to the specific type we expect
-            let classificationObservations = observations.compactMap { observation in
-                observation as? ClassificationObservation // Try casting each element
-            }
-            // Now, 'classificationObservations' is correctly typed as [ClassificationObservation]
-
-            // 3. Process the specifically typed results as before
-            if let topResult = classificationObservations.first {
-                // Assuming ClassificationObservation has identifier and confidence
-                self.classificationLabel = "\(topResult.identifier) (\(String(format: "%.0f%%", topResult.confidence * 100)))"
-                print("Classification success: \(self.classificationLabel)")
-            } else {
-                print("Classification returned no results or results couldn't be cast.")
-                self.classificationLabel = "No classification result"
-            }
-        }
-    
-    // --- Async Helper for OCR ---
+    // --- Async Helper for Classification ---
     @MainActor
-    private func performOCR(request: RecognizeTextRequest, on cgImage: CGImage, orientation: CGImagePropertyOrientation) async throws {
-         let results: [RecognizedTextObservation] = try await request.perform(on: cgImage, orientation: orientation)
-         print("OCR success: Found \(results.count) observations.")
-         self.visionResults = results // Update state with new observation type
+    private func performClassification(request: CoreMLRequest, on cgImage: CGImage, orientation: CGImagePropertyOrientation, label: inout String?, error: inout Error?) async {
+        do {
+            let observations: [any VisionObservation] = try await request.perform(on: cgImage, orientation: orientation)
+            let classificationObservations = observations.compactMap { $0 as? ClassificationObservation }
+            if let topResult = classificationObservations.first {
+                label = "\(topResult.identifier) (\(String(format: "%.0f%%", topResult.confidence * 100)))"
+                print("Classification helper success: \(label ?? "N/A")")
+            } else {
+                print("Classification helper returned no results.")
+                label = "No classification result"
+            }
+        } catch let classificationError {
+            print("Classification helper Error: \(classificationError.localizedDescription)")
+            error = classificationError
+            label = "Classification Error"
+        }
     }
 
+    // --- Async Helper for OCR ---
+    @MainActor
+    private func performOCR(request: RecognizeTextRequest, on cgImage: CGImage, orientation: CGImagePropertyOrientation, error: inout Error?) async {
+         do {
+             let results: [RecognizedTextObservation] = try await request.perform(on: cgImage, orientation: orientation)
+             print("OCR helper success: Found \(results.count) observations.")
+             self.visionResults = results
+         } catch let ocrError {
+             print("OCR helper Error: \(ocrError.localizedDescription)")
+             error = ocrError
+             self.visionResults = []
+         }
+    }
 
-    // --- Orientation Helper (Unchanged) ---
+    // --- Orientation Helper ---
     private func cgOrientation(from uiOrientation: UIImage.Orientation) -> CGImagePropertyOrientation {
          switch uiOrientation {
-            case .up: return .up; case .down: return .down; case .left: return .left; case .right: return .right
-            case .upMirrored: return .upMirrored; case .downMirrored: return .downMirrored; case .leftMirrored: return .leftMirrored; case .rightMirrored: return .rightMirrored
+            case .up: return .up; case .down: return .down; case .left: return .left; case .right: return .right;
+            case .upMirrored: return .upMirrored; case .downMirrored: return .downMirrored; case .leftMirrored: return .leftMirrored; case .rightMirrored: return .rightMirrored;
             @unknown default: print("Warning: Unknown UIImage.Orientation (\(uiOrientation.rawValue)), defaulting to .up"); return .up
          }
     }
 
 } // End ContentView
 
-// MARK: - Subviews (Bindings Updated, ResultsView uses new types)
-
-struct WelcomeView: View {
-    // Add classification binding to reset it
-    @Binding var showCamera: Bool
-    @Binding var capturedImage: UIImage?
-    @Binding var visionResults: [RecognizedTextObservation] // NEW Type
-    @Binding var classificationLabel: String // NEW Binding
-
-    var body: some View {
-        VStack {
-            Spacer()
-            Text("Image Text Scanner POC").font(.largeTitle).padding(.bottom, 5)
-            Text("Tap 'Start Scan' to capture an image and extract text.").font(.body).foregroundColor(.secondary).multilineTextAlignment(.center).padding([.leading, .trailing])
-            Spacer()
-            Button("Start Scan") {
-                self.capturedImage = nil
-                self.visionResults = []
-                self.classificationLabel = "" // Also clear classification
-                self.showCamera = true
-            }
-            .padding().buttonStyle(.borderedProminent)
-            Spacer()
-        }
-    }
-}
-
-struct ResultsView: View {
-    // Add binding for classificationLabel, use new observation type
-    @Binding var capturedImage: UIImage?
-    @Binding var visionResults: [RecognizedTextObservation] // NEW Type
-    @Binding var isProcessing: Bool
-    @Binding var showCamera: Bool
-    @Binding var classificationLabel: String // NEW Binding
-
-    var body: some View {
-        VStack {
-            // Display Classification Result First
-            Text("Detected: \(classificationLabel.isEmpty ? "N/A" : classificationLabel)")
-                 .font(.title3)
-                 .padding(.top)
-                 .padding(.horizontal)
-
-            // Display Image and Bounding Boxes
-            ZStack {
-                if let image = capturedImage {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        // Ensure BoundingBoxOverlay uses the new observation type
-                        .overlay(BoundingBoxOverlay(observations: visionResults))
-                } else {
-                    Text("Error displaying image.")
-                }
-            }
-            .frame(minHeight: 150, maxHeight: 300)
-            .border(Color.gray, width: 1)
-            .padding([.leading, .trailing, .bottom])
-
-            // Display OCR Text List
-            List {
-                Section("Extracted Text:") {
-                    if visionResults.isEmpty && !isProcessing {
-                         Text("Processing complete. No text found.")
-                            .foregroundColor(.gray)
-                    } else if isProcessing {
-                         Text("Processing...")
-                            .foregroundColor(.gray)
-                    } else {
-                         // Iterate using new observation type
-                         ForEach(visionResults, id: \.uuid) { observation in // Assumes .uuid
-                             // *** ASSUMPTION HERE for top text candidate ***
-                             Text(observation.topCandidates(1).first?.string ?? "Read Error")
-                         }
-                    }
-                }
-            }
-            .listStyle(InsetGroupedListStyle())
-        } // End Results VStack
-    } // End body
-} // End ResultsView
-
-// ProcessingIndicatorView remains the same
-struct ProcessingIndicatorView: View {
-     var body: some View {
-        ZStack {
-            Color(white: 0, opacity: 0.5).edgesIgnoringSafeArea(.all)
-            ProgressView("Processing...")
-                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                .padding()
-                .background(Color.black.opacity(0.7))
-                .foregroundColor(.white)
-                .cornerRadius(10)
-                .shadow(radius: 10)
-        }
-    }
-}
-
-
 // MARK: - Preview
 #Preview {
-    // Ensure preview works, might need to adjust if state causes issues
     ContentView()
 }
