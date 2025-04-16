@@ -7,55 +7,72 @@
 //
 
 import SwiftUI
-import Vision // Import Vision framework
-import CoreGraphics // For CGImagePropertyOrientation
+import Vision
+import CoreGraphics
 
 // Ensure Deployment Target is iOS 18.0+
 
 struct MeterReadingView: View {
-    // MARK: - State Variables specific to this view
+    // MARK: - State Variables
     @State private var showCamera = false
     @State private var capturedImage: UIImage? = nil
-    @State private var visionResults: [RecognizedTextObservation] = [] // Holds OCR results
+    // visionResults could be removed if bounding boxes are definitely not needed here
+    // @State private var visionResults: [RecognizedTextObservation] = []
     @State private var isProcessing = false
+    @State private var detectedNumbers: [String] = [] // Holds filtered number strings
+    @State private var selectedReading: String? = nil // Holds the user's selection (now auto-set initially)
 
     var body: some View {
         VStack {
-            // Area to display results (initially empty)
+            // List to display detected numbers and allow selection
             List {
-                Section("Extracted Text from Meter:") {
+                Section("Select Meter Reading:") { // Updated header
                     if isProcessing {
                         HStack {
                             Spacer()
-                            ProgressView() // Show simple spinner inline while processing
+                            ProgressView()
                             Spacer()
                         }
-                    } else if visionResults.isEmpty {
-                        Text(capturedImage == nil ? "Tap 'Scan Meter' below." : "No text detected.")
+                    } else if detectedNumbers.isEmpty {
+                        Text(capturedImage == nil ? "Tap 'Scan Meter' below." : "No numbers detected in image.")
                             .foregroundColor(.gray)
                     } else {
-                        // Display raw text results
-                        ForEach(visionResults, id: \.uuid) { observation in // Assumes .uuid
-                            // Assumes .topCandidates exists on new type
-                            Text(observation.topCandidates(1).first?.string ?? "Read Error")
+                        // Display FILTERED numbers as Buttons
+                        ForEach(detectedNumbers, id: \.self) { numberString in
+                            Button {
+                                // Action: Allow user to override auto-selection
+                                selectedReading = numberString
+                                print("User manually selected reading: \(numberString)")
+                            } label: {
+                                // Row content: Number and checkmark if selected
+                                HStack {
+                                    Text(numberString)
+                                        // Highlight selected number
+                                        .fontWeight(selectedReading == numberString ? .bold : .regular)
+                                        .foregroundColor(selectedReading == numberString ? .blue : .primary)
+                                    Spacer()
+                                    if selectedReading == numberString {
+                                        Image(systemName: "checkmark")
+                                            .foregroundColor(.blue)
+                                            .fontWeight(.bold)
+                                    }
+                                }
+                                .contentShape(Rectangle()) // Make entire row tappable
+                            }
+                            .buttonStyle(.plain) // Use plain style for list appearance
                         }
                     }
                 }
             }
             .listStyle(InsetGroupedListStyle())
-            // Optionally show the captured image for reference
-            // if let image = capturedImage {
-            //     Image(uiImage: image)
-            //         .resizable().scaledToFit().frame(height: 150)
-            // }
 
             Spacer() // Pushes button to bottom
 
-            // Button to start the scan for this feature
             Button {
-                self.visionResults = [] // Clear previous results
-                self.capturedImage = nil // Clear previous image
-                self.showCamera = true  // Trigger sheet presentation
+                self.detectedNumbers = [] // Clear previous numbers
+                self.selectedReading = nil // Clear previous selection
+                self.capturedImage = nil
+                self.showCamera = true
             } label: {
                 Label("Scan Meter", systemImage: "camera.viewfinder")
             }
@@ -64,43 +81,37 @@ struct MeterReadingView: View {
             .padding()
 
         } // End main VStack
-        .navigationTitle("Read Meter") // Set title for this screen
-
-        // Modifier to present the ImagePicker
-        // Using .sheet here, but .fullScreenCover is also fine
+        .navigationTitle("Read Meter")
         .sheet(isPresented: $showCamera) {
-            // Re-use ImagePicker, passing binding for the captured image
             ImagePicker(selectedImage: $capturedImage)
         }
-        // Modifier to trigger processing when a new image is captured
         .onChange(of: capturedImage) { _, newImage in // iOS 17+ signature
             if let image = newImage {
                 print("MeterReadingView: onChange detected new image. Launching processing Task.")
-                // Launch Task to perform async Vision processing
                 Task {
-                    // Set processing state ON (MainActor implicitly via @State update)
-                    isProcessing = true
-                    // Call the local async function to perform OCR
+                    await MainActor.run {
+                        isProcessing = true
+                        detectedNumbers = [] // Clear old numbers
+                        selectedReading = nil // Clear old selection
+                    }
                     await performVisionRequest(on: image)
-                    // Set processing state OFF (MainActor implicitly)
-                    isProcessing = false
+                    await MainActor.run {
+                        isProcessing = false
+                    }
                 }
             }
         }
-        // Modifier to show overlay while processing (optional, List shows inline spinner)
+        // Optional overlay for processing
         // .overlay { if isProcessing { ProcessingIndicatorView() } }
 
     } // End body
 
-    // MARK: - Vision Processing Function (Adapted for this view)
+    // MARK: - Vision Processing Function (UPDATED with Auto-Selection)
 
-    /// Performs text recognition using the new Vision API (`RecognizeTextRequest`).
-    /// Updates the local `visionResults` state variable.
-    @MainActor // Ensure state updates run safely on the main actor
+    @MainActor
     private func performVisionRequest(on image: UIImage) async {
         guard let cgImage = image.cgImage else {
             print("MeterReadingView Error: Failed to get CGImage.")
-            // isProcessing is set false by the calling Task
             return
         }
 
@@ -108,38 +119,69 @@ struct MeterReadingView: View {
         print("MeterReadingView DEBUG: Using CGImagePropertyOrientation: \(imageOrientation.rawValue)")
         print("MeterReadingView: Starting Vision Text Recognition (New API)...")
 
-        // --- Prepare Text Recognition Request ---
-        var textRequest = RecognizeTextRequest() // Use new struct, make VAR
+        var textRequest = RecognizeTextRequest()
         textRequest.recognitionLevel = .accurate
-        textRequest.usesLanguageCorrection = true // Keep enabled, might help with numbers if noisy
+        textRequest.usesLanguageCorrection = true
 
-        // --- Perform Request using async/await ---
+        var numbersOnly: [String] = [] // Temporary local array
+        var autoSelectedReading: String? = nil // Temporary local var for selection
+
         do {
-            // No separate handler needed for new API's perform method
             print("MeterReadingView: Performing RecognizeTextRequest directly...")
             let results: [RecognizedTextObservation] = try await textRequest.perform(
                 on: cgImage,
                 orientation: imageOrientation
             )
+            print("MeterReadingView OCR success: Found \(results.count) raw observations.")
 
-            // Success: Update local state directly (we are on @MainActor)
-            print("MeterReadingView OCR success: Found \(results.count) observations.")
-            self.visionResults = results
+            // --- FILTER FOR NUMBERS ---
+            for observation in results {
+                guard let topCandidate = observation.topCandidates(1).first else { continue }
+                let rawText = topCandidate.string
+                let cleanedText = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+                // Consider more cleaning? e.g., removing commas for larger numbers?
+                // let veryCleanText = cleanedText.replacingOccurrences(of: ",", with: "")
+                // if Double(veryCleanText) != nil { ... }
+
+                if Double(cleanedText) != nil {
+                    print("Found number: \(cleanedText)")
+                    numbersOnly.append(cleanedText)
+                }
+            }
+            print("Found \(numbersOnly.count) potential numbers.")
+            // --- END FILTER ---
+
+            // --- AUTO-SELECT LARGEST NUMBER ---
+            if !numbersOnly.isEmpty {
+                // Use max(by:) with a closure that compares the Double values of the strings
+                autoSelectedReading = numbersOnly.max { (str1, str2) -> Bool in
+                    // Safely convert to Double for comparison, default to very small number if conversion fails
+                    let num1 = Double(str1) ?? -Double.infinity
+                    let num2 = Double(str2) ?? -Double.infinity
+                    return num1 < num2 // For max(by:), return true if first element is smaller
+                }
+                print("Automatically selected largest number string: \(autoSelectedReading ?? "None")")
+            }
+            // --- END AUTO-SELECT ---
 
         } catch {
-            // Handle errors performing the request
             print("MeterReadingView Error: Failed to perform Vision request: \(error.localizedDescription)")
-            self.visionResults = [] // Clear results on error
+            // Ensure state is cleared on error
+            numbersOnly = []
+            autoSelectedReading = nil
         }
-        // --- End Perform Request ---
 
-        // isProcessing = false is handled by the calling Task after await returns/throws
+        // --- Update State Variables ---
+        // Update state AFTER all processing (filtering and auto-select) is done
+        self.detectedNumbers = numbersOnly
+        self.selectedReading = autoSelectedReading
+        // --- End State Update ---
+
         print("MeterReadingView: Vision processing function finished.")
     } // End performVisionRequest
 
 
     // --- Orientation Helper (Copied from ContentView) ---
-    // Keep this helper function within MeterReadingView as well
     private func cgOrientation(from uiOrientation: UIImage.Orientation) -> CGImagePropertyOrientation {
          switch uiOrientation {
             case .up: return .up; case .down: return .down; case .left: return .left; case .right: return .right;
@@ -152,7 +194,6 @@ struct MeterReadingView: View {
 
 // MARK: - Preview
 #Preview {
-    // Embed in NavigationView for previewing navigation title
     NavigationView {
         MeterReadingView()
     }
