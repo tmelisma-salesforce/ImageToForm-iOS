@@ -16,38 +16,30 @@ struct MeterReadingView: View {
     // MARK: - State Variables
     @State private var showCamera = false
     @State private var capturedImage: UIImage? = nil
-    // visionResults could be removed if bounding boxes are definitely not needed here
-    // @State private var visionResults: [RecognizedTextObservation] = []
     @State private var isProcessing = false
-    @State private var detectedNumbers: [String] = [] // Holds filtered number strings
-    @State private var selectedReading: String? = nil // Holds the user's selection (now auto-set initially)
+    @State private var detectedNumbers: [String] = []
+    @State private var selectedReading: String? = nil
+    @State private var confirmationMessage: String = "" // NEW: Holds confirmation text
 
     var body: some View {
-        VStack {
+        VStack(spacing: 0) { // Use spacing 0 to make List and confirmation section adjacent
             // List to display detected numbers and allow selection
             List {
-                Section("Select Meter Reading:") { // Updated header
+                Section("Select Meter Reading (Largest Auto-Selected):") {
                     if isProcessing {
-                        HStack {
-                            Spacer()
-                            ProgressView()
-                            Spacer()
-                        }
+                        HStack { Spacer(); ProgressView(); Spacer() }
                     } else if detectedNumbers.isEmpty {
                         Text(capturedImage == nil ? "Tap 'Scan Meter' below." : "No numbers detected in image.")
                             .foregroundColor(.gray)
                     } else {
-                        // Display FILTERED numbers as Buttons
                         ForEach(detectedNumbers, id: \.self) { numberString in
                             Button {
-                                // Action: Allow user to override auto-selection
                                 selectedReading = numberString
+                                confirmationMessage = "" // Clear confirmation when selection changes
                                 print("User manually selected reading: \(numberString)")
                             } label: {
-                                // Row content: Number and checkmark if selected
                                 HStack {
                                     Text(numberString)
-                                        // Highlight selected number
                                         .fontWeight(selectedReading == numberString ? .bold : .regular)
                                         .foregroundColor(selectedReading == numberString ? .blue : .primary)
                                     Spacer()
@@ -57,28 +49,75 @@ struct MeterReadingView: View {
                                             .fontWeight(.bold)
                                     }
                                 }
-                                .contentShape(Rectangle()) // Make entire row tappable
+                                .contentShape(Rectangle())
                             }
-                            .buttonStyle(.plain) // Use plain style for list appearance
+                            .buttonStyle(.plain)
                         }
                     }
                 }
             }
             .listStyle(InsetGroupedListStyle())
+            // Make the list flexible in size but not necessarily take all space
+            // .layoutPriority(1) // Optional: Give list priority if needed
 
-            Spacer() // Pushes button to bottom
+            // --- NEW: Confirmation Section ---
+            VStack {
+                Divider() // Visual separator
+
+                HStack {
+                    Text("Selected:")
+                        .font(.headline)
+                    // Display the selected reading or "None"
+                    Text(selectedReading ?? "None")
+                        .font(.body.monospacedDigit()) // Use monospaced for numbers
+                        .foregroundColor(selectedReading == nil ? .gray : .primary)
+                    Spacer() // Pushes button to the right
+                    Button("Confirm Reading") {
+                        // Action: Set confirmation message (simulate saving)
+                        if let reading = selectedReading {
+                            confirmationMessage = "Reading '\(reading)' stored successfully!"
+                            print("Confirmed reading: \(reading)")
+                            // Optionally disable button after confirm, or clear selection?
+                            // For now, just show message. User can re-confirm if desired.
+                        }
+                    }
+                    // Enable button only if a reading IS selected
+                    .disabled(selectedReading == nil)
+                    .buttonStyle(.borderedProminent)
+                }
+                .padding([.horizontal, .top]) // Add padding to this HStack
+
+                // Display the confirmation message if it's not empty
+                if !confirmationMessage.isEmpty {
+                    Text(confirmationMessage)
+                        .font(.caption)
+                        .foregroundColor(.green)
+                        .padding(.horizontal)
+                        .padding(.top, 5)
+                        .transition(.opacity) // Add a subtle fade
+                }
+
+                Spacer().frame(height: 10) // Add some space at the bottom
+            }
+            .background(.regularMaterial) // Give confirmation area a distinct background
+            // --- END Confirmation Section ---
+
+            // Scan button might be better placed above confirmation area or within it
+            // Let's keep it at the very bottom for now.
+            Spacer() // Pushes Scan button down
 
             Button {
-                self.detectedNumbers = [] // Clear previous numbers
-                self.selectedReading = nil // Clear previous selection
+                self.detectedNumbers = []
+                self.selectedReading = nil
                 self.capturedImage = nil
+                self.confirmationMessage = "" // Clear confirmation on new scan
                 self.showCamera = true
             } label: {
                 Label("Scan Meter", systemImage: "camera.viewfinder")
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            .padding()
+            .padding() // Add padding below the button
 
         } // End main VStack
         .navigationTitle("Read Meter")
@@ -91,22 +130,21 @@ struct MeterReadingView: View {
                 Task {
                     await MainActor.run {
                         isProcessing = true
-                        detectedNumbers = [] // Clear old numbers
-                        selectedReading = nil // Clear old selection
+                        detectedNumbers = []
+                        selectedReading = nil
+                        confirmationMessage = "" // Clear confirmation message
                     }
-                    await performVisionRequest(on: image)
+                    await performVisionRequest(on: image) // This populates detectedNumbers and auto-selects selectedReading
                     await MainActor.run {
                         isProcessing = false
                     }
                 }
             }
         }
-        // Optional overlay for processing
-        // .overlay { if isProcessing { ProcessingIndicatorView() } }
 
     } // End body
 
-    // MARK: - Vision Processing Function (UPDATED with Auto-Selection)
+    // MARK: - Vision Processing Function (Unchanged from previous step)
 
     @MainActor
     private func performVisionRequest(on image: UIImage) async {
@@ -114,17 +152,15 @@ struct MeterReadingView: View {
             print("MeterReadingView Error: Failed to get CGImage.")
             return
         }
-
         let imageOrientation = cgOrientation(from: image.imageOrientation)
         print("MeterReadingView DEBUG: Using CGImagePropertyOrientation: \(imageOrientation.rawValue)")
         print("MeterReadingView: Starting Vision Text Recognition (New API)...")
-
         var textRequest = RecognizeTextRequest()
         textRequest.recognitionLevel = .accurate
         textRequest.usesLanguageCorrection = true
 
-        var numbersOnly: [String] = [] // Temporary local array
-        var autoSelectedReading: String? = nil // Temporary local var for selection
+        var numbersOnly: [String] = []
+        var autoSelectedReading: String? = nil
 
         do {
             print("MeterReadingView: Performing RecognizeTextRequest directly...")
@@ -134,54 +170,41 @@ struct MeterReadingView: View {
             )
             print("MeterReadingView OCR success: Found \(results.count) raw observations.")
 
-            // --- FILTER FOR NUMBERS ---
+            // Filter for Numbers
             for observation in results {
                 guard let topCandidate = observation.topCandidates(1).first else { continue }
-                let rawText = topCandidate.string
-                let cleanedText = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
-                // Consider more cleaning? e.g., removing commas for larger numbers?
-                // let veryCleanText = cleanedText.replacingOccurrences(of: ",", with: "")
-                // if Double(veryCleanText) != nil { ... }
-
+                let cleanedText = topCandidate.string.trimmingCharacters(in: .whitespacesAndNewlines)
                 if Double(cleanedText) != nil {
-                    print("Found number: \(cleanedText)")
                     numbersOnly.append(cleanedText)
                 }
             }
             print("Found \(numbersOnly.count) potential numbers.")
-            // --- END FILTER ---
 
-            // --- AUTO-SELECT LARGEST NUMBER ---
+            // Auto-select Largest Number
             if !numbersOnly.isEmpty {
-                // Use max(by:) with a closure that compares the Double values of the strings
                 autoSelectedReading = numbersOnly.max { (str1, str2) -> Bool in
-                    // Safely convert to Double for comparison, default to very small number if conversion fails
                     let num1 = Double(str1) ?? -Double.infinity
                     let num2 = Double(str2) ?? -Double.infinity
-                    return num1 < num2 // For max(by:), return true if first element is smaller
+                    return num1 < num2
                 }
                 print("Automatically selected largest number string: \(autoSelectedReading ?? "None")")
             }
-            // --- END AUTO-SELECT ---
 
         } catch {
             print("MeterReadingView Error: Failed to perform Vision request: \(error.localizedDescription)")
-            // Ensure state is cleared on error
             numbersOnly = []
             autoSelectedReading = nil
         }
 
-        // --- Update State Variables ---
-        // Update state AFTER all processing (filtering and auto-select) is done
+        // Update State (already on @MainActor)
         self.detectedNumbers = numbersOnly
-        self.selectedReading = autoSelectedReading
-        // --- End State Update ---
+        self.selectedReading = autoSelectedReading // Set initial selection
 
         print("MeterReadingView: Vision processing function finished.")
     } // End performVisionRequest
 
 
-    // --- Orientation Helper (Copied from ContentView) ---
+    // --- Orientation Helper (Unchanged) ---
     private func cgOrientation(from uiOrientation: UIImage.Orientation) -> CGImagePropertyOrientation {
          switch uiOrientation {
             case .up: return .up; case .down: return .down; case .left: return .left; case .right: return .right;
