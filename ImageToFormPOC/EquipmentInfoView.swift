@@ -176,7 +176,7 @@ struct EquipmentInfoView: View {
         // --- Full Screen Cover for Camera ---
         // Presented when showCamera is true
         .fullScreenCover(isPresented: $showCamera) {
-            ImagePicker(selectedImage: $capturedEquipmentImage) // Ensure ImagePicker.swift exists
+            ImagePicker(selectedImage: $capturedEquipmentImage, isFrontCamera: false) // Specify false
         }
         // --- onChange Modifier to Trigger Processing ---
         // Runs when capturedEquipmentImage receives a new value

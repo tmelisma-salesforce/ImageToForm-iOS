@@ -122,7 +122,7 @@ struct MeterReadingView: View {
         } // End main VStack
         .navigationTitle("Read Meter")
         .sheet(isPresented: $showCamera) {
-            ImagePicker(selectedImage: $capturedImage)
+            ImagePicker(selectedImage: $capturedImage, isFrontCamera: false) // Specify false
         }
         .onChange(of: capturedImage) { _, newImage in // iOS 17+ signature
             if let image = newImage {
