@@ -7,17 +7,15 @@
 //
 
 import SwiftUI
-import Vision
-import CoreML
-import CoreGraphics
-import Accelerate
+import Vision        // Vision framework
+import CoreML        // CoreML for model loading
+import CoreGraphics  // For orientation, CGRect
+import Accelerate    // For potential NMS optimizations later
 
-// Ensure Deployment Target is iOS 18.0+
+// Ensure Deployment Target is iOS 18.0+ or compatible
 
-// Supporting Struct definitions now live in YOLOv8Parser.swift (or own files)
-// struct DetectedObject: Identifiable { ... }
-// struct AssignableField: Identifiable { ... } // REMOVED FROM HERE
-// private struct DetectionCandidate { ... }
+// Supporting Structs should be defined elsewhere (e.g., YOLOv8Parser.swift or Models.swift)
+// Ensure DetectedObject is Identifiable where it's defined.
 
 @MainActor
 class ProtectiveGearViewModel: ObservableObject {
@@ -25,13 +23,14 @@ class ProtectiveGearViewModel: ObservableObject {
     // MARK: - Published State
     @Published var selfieImage: UIImage? = nil
     @Published var isProcessing = false
-    @Published var detectedObjects: [DetectedObject] = [] // Uses struct from Parser file
+    @Published var detectedObjects: [DetectedObject] = []
     @Published var detectionErrorMessage: String? = nil
     @Published var showDetectionPreview = false
     @Published var showFrontCamera = false
 
     // MARK: - Dependencies
-    private let objectParser = YOLOv8Parser() // Create instance of the parser
+    // Assumes YOLOv8Parser.swift contains the YOLOv8Parser struct definition
+    private let objectParser = YOLOv8Parser()
 
     // MARK: - Actions from UI
     func checkGearButtonTapped() { resetState(); showFrontCamera = true }
@@ -50,9 +49,9 @@ class ProtectiveGearViewModel: ObservableObject {
 
     // MARK: - Internal State Reset
     func resetState(clearImage: Bool = true) {
-        print("ViewModel: Resetting state.")
+        print("ViewModel: Resetting state (clearImage: \(clearImage)).")
         if clearImage { self.selfieImage = nil }
-        self.detectedObjects = [] // Use explicit type if needed [] as [DetectedObject]
+        self.detectedObjects = []
         self.detectionErrorMessage = nil
         self.isProcessing = false
         self.showDetectionPreview = false
@@ -62,72 +61,82 @@ class ProtectiveGearViewModel: ObservableObject {
     // MARK: - Object Detection Logic
 
     private func performObjectDetection(on image: UIImage) async {
-        // Set state on main actor (already here)
         self.isProcessing = true
         self.detectionErrorMessage = nil
         self.detectedObjects = []
 
         guard let cgImage = image.cgImage else {
-            detectionErrorMessage = "Failed to load image."; isProcessing = false; return
+            await MainActor.run {
+                self.detectionErrorMessage = "Failed to convert image for processing."
+                self.isProcessing = false
+            }
+            return
         }
         let imageOrientation = cgOrientation(from: image.imageOrientation)
         print("ProtectiveGearViewModel: Starting Object Detection...")
 
-        var processingError: String? = nil // Local error accumulation
+        var processingError: String? = nil
 
         do {
-            // --- Load Model ---
-            print("Loading yolo11x model...")
-            // *** Replace 'yolo11x' if needed ***
-            guard let coreMLModel = try? yolo11x(configuration: MLModelConfiguration()).model else {
-                 throw NSError(domain: "ProtectiveGearViewModel", code: 100, userInfo: [NSLocalizedDescriptionKey: "Failed to load yolo11x model."])
+            // --- 1. Load Model ---
+            print("Loading yolov8l model...")
+            guard let coreMLModel = try? yolov8l(configuration: MLModelConfiguration()).model else {
+                 throw NSError(domain: "ProtectiveGearViewModel", code: 100, userInfo: [NSLocalizedDescriptionKey: "Failed to load yolov8l model."])
             }
             let visionModel = try VNCoreMLModel(for: coreMLModel)
-            print("yolo11x model loaded.")
+            print("yolov8l model loaded.")
 
-            // --- Create Request ---
+            // --- 2. Create Request with Completion Handler ---
             let request = VNCoreMLRequest(model: visionModel) { [weak self] (request, error) in
-                 // --- Completion Handler (Background Thread) ---
+                 // --- 3. Process Results (Completion Handler - Background Thread) ---
                  guard let self = self else { return }
 
                  var handlerDetections: [DetectedObject] = []
                  var handlerError: String? = nil
 
                  if let error = error {
-                     print("Object Detection Error: \(error.localizedDescription)")
+                     print("Object Detection Completion Error: \(error.localizedDescription)")
                      handlerError = "Detection request failed."
                  } else if let results = request.results {
                      print("Object Detection Raw Results Count: \(results.count)")
-                     let outputName = "var_2219" // *** VERIFY ***
 
+                     // --- CORRECTED TENSOR ACCESS ---
+                     // Access primary multi-array output directly from featureValue
                      guard let observation = results.first as? VNCoreMLFeatureValueObservation,
                            let tensor = observation.featureValue.multiArrayValue else {
-                           print("Parsing Error: Could not get MLMultiArray output tensor.")
+                           print("Parsing Error: Could not get MLMultiArray output tensor from featureValue.")
                            handlerError = "Invalid model output format."
-                           // Need to update state from here too
+                           // Update state via Task below
                            Task { @MainActor in self.updateDetectionState(detections: [], error: handlerError) }
-                           return // Exit completion handler
+                           return // Exit completion handler early
                      }
-                     print("DEBUG: Output Tensor '\(outputName)' Shape: \(tensor.shape)")
+                     // --- END CORRECTION ---
 
-                     // --- Call External Parser ---
+                     print("DEBUG: Output Tensor Shape: \(tensor.shape)") // Tensor is non-optional here
+
+                     // --- 4. Call External Parser ---
                      print("Calling YOLOv8Parser...")
-                     let parseResult = self.objectParser.parse(tensor: tensor) // Use instance
+                     let parseResult = self.objectParser.parse(tensor: tensor) // Use the parser instance
                      handlerDetections = parseResult.detections
-                     if let parseError = parseResult.error {
-                          handlerError = parseError
-                     }
+                     if let parseError = parseResult.error { handlerError = parseError }
                      print("Parsing complete. Found: \(handlerDetections.count)")
 
                  } else { handlerError = "No results from model." }
 
-                 // --- Update State via Task @MainActor ---
+                 // --- 5. UPDATE STATE ON MAIN ACTOR ---
                  Task { @MainActor in
                      self.updateDetectionState(detections: handlerDetections, error: handlerError)
                  }
-                 // --- End State Update ---
-            } // --- End Completion Handler ---
+                 // --- END STATE UPDATE ---
 
+            } // --- End VNCoreMLRequest completion handler ---
+
+
+            // --- Configure Request (Corrected Enum Usage) ---
+            // Use the explicit enum name for clarity and to avoid inference issues
+            request.imageCropAndScaleOption = VNImageCropAndScaleOption.scaleFit
+            print("DEBUG: Set imageCropAndScaleOption to .scaleFit")
+            // --- End Configuration ---
 
             // --- Perform Request ---
              print("Performing VNCoreMLRequest...")
@@ -135,38 +144,40 @@ class ProtectiveGearViewModel: ObservableObject {
              try requestHandler.perform([request])
              print("VNCoreMLRequest perform call completed (results handled async).")
 
-        } catch {
+        } catch { // Handle setup/perform errors
             print("Error setting up or performing object detection: \(error)")
             processingError = "Setup/Perform Error (\(error.localizedDescription.prefix(50)))"
-            // Update state directly here on setup/perform error
+            // Update state directly for these critical errors
             self.updateDetectionState(detections: [], error: processingError)
         }
-        // Note: Final state update (isProcessing=false, showDetectionPreview=true)
-        // now happens *within* the completion handler's MainActor Task via updateDetectionState
     } // End performObjectDetection
 
 
-    /// Centralized function to update state after detection attempt
+    /// Centralized function to update state after detection attempt (runs on MainActor)
     private func updateDetectionState(detections: [DetectedObject], error: String?) {
         print("Updating state on main actor...")
         self.detectedObjects = detections
         self.detectionErrorMessage = error
-        // Show preview if we got detections OR if an error occurred to show the message
         if !detections.isEmpty || error != nil {
              self.showDetectionPreview = true
              print("Triggering detection preview.")
-             // Keep processing indicator ON until user acts on preview
-             self.isProcessing = true // <<< KEEP TRUE until proceed/retake
+             // Keep isProcessing = true until user acts on preview
+             self.isProcessing = true // Keep indicator showing while preview is up
         } else {
-             // No detections and no error
              self.showDetectionPreview = false
-             self.isProcessing = false // OK to stop processing
+             self.isProcessing = false // Stop processing if nothing to show/review
              print("No detections/error, not showing preview, stopping processing.")
+        }
+        // Logic refinement: Ensure isProcessing eventually becomes false
+        // It's set false now in proceedFromPreview() and retakePhoto() which dismiss the preview.
+        // Also need to handle case where preview isn't shown.
+        if !self.showDetectionPreview {
+            self.isProcessing = false
         }
     }
 
-
     // MARK: - Orientation Helper
+    /// Converts UIImage.Orientation to CGImagePropertyOrientation. Marked private.
     private func cgOrientation(from uiOrientation: UIImage.Orientation) -> CGImagePropertyOrientation {
          switch uiOrientation {
             case .up: return .up; case .down: return .down; case .left: return .left; case .right: return .right;
