@@ -11,14 +11,14 @@ import SwiftUI
 struct FieldAssignmentView: View {
     // MARK: - Properties Passed In
     @Binding var isPresented: Bool
-    let allOcrStrings: [String] // Filtered list
+    let allOcrStrings: [String] // Filtered list (excluding already assigned)
     let fieldName: String
     let onAssign: (String?) -> Void
-    let autoParsedData: [String: String] // Auto-parsed data
+    let autoParsedData: [String: String] // Auto-parsed data to display
 
     // MARK: - Local State
     @State private var manualEntry: String = ""
-    @State private var recentlySelected: String? = nil
+    @State private var recentlySelected: String? = nil // For selection animation
 
     // Helper for stable display order of auto-parsed data
     private var sortedAutoParsedKeys: [String] {
@@ -28,21 +28,24 @@ struct FieldAssignmentView: View {
     // MARK: - Body
     var body: some View {
         NavigationView {
-            VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) { // Manage spacing with padding
 
-                // Header
+                // Header showing which field to assign
                 VStack(alignment: .leading) {
-                    Text("Assign Value For:").font(.headline).foregroundColor(.gray)
-                    Text(fieldName).font(.title).fontWeight(.bold)
+                    Text("Assign Value For:")
+                        .font(.headline).foregroundColor(.gray)
+                    Text(fieldName)
+                        .font(.title).fontWeight(.bold)
                 }
                 .padding(.horizontal).padding(.top).padding(.bottom, 10)
 
                 Divider()
 
-                // Display Auto-Parsed Values
+                // Section displaying values already auto-parsed
                  if !autoParsedData.isEmpty {
                      VStack(alignment: .leading) {
-                         Text("Auto-Detected Values:").font(.caption).foregroundColor(.gray).padding(.bottom, 1)
+                         Text("Auto-Detected Values:")
+                             .font(.caption).foregroundColor(.gray).padding(.bottom, 1)
                          ForEach(sortedAutoParsedKeys, id: \.self) { key in
                              HStack {
                                  Text("\(userFriendlyFieldName(key)):").font(.caption.bold())
@@ -57,55 +60,70 @@ struct FieldAssignmentView: View {
                      Divider()
                  }
 
-                // Manual Entry
+                // Manual entry option
                 HStack {
-                    TextField("Enter Manually or Select Below", text: $manualEntry).textFieldStyle(.roundedBorder)
-                    Button("Assign Manual") { assignValue(manualEntry) }.buttonStyle(.bordered).disabled(manualEntry.isEmpty)
+                    TextField("Enter Manually or Select Below", text: $manualEntry)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Assign Manual") { assignValue(manualEntry) }
+                        .buttonStyle(.bordered)
+                        .disabled(manualEntry.isEmpty)
                 }
                 .padding([.horizontal, .bottom]).padding(.top)
 
-                // OCR Results List
-                Text("Select from OCR Results:").font(.caption).padding(.horizontal).padding(.bottom, 5)
+                // Header for OCR list
+                Text("Select from OCR Results:")
+                    .font(.caption)
+                    .padding(.horizontal)
+                    .padding(.bottom, 5)
+
+                // Scrollable list of available OCR results
                 ScrollView {
                     VStack(alignment: .leading, spacing: 5) {
+                        // Iterate over filtered strings passed in
                         ForEach(allOcrStrings, id: \.self) { ocrString in
-                            ocrStringButton(ocrString)
+                            ocrStringButton(ocrString) // Use helper view builder
                         }
                     }
                     .padding(.horizontal).padding(.bottom)
                 }
-                .animation(.easeInOut(duration: 0.2), value: recentlySelected)
+                .animation(.easeInOut(duration: 0.2), value: recentlySelected) // Animate selection highlight
 
                 Divider().padding(.top, 5)
 
-                // Skip Button
+                // Skip button
                 HStack {
                     Spacer()
-                    Button("Skip Field") { assignValue(nil) }
+                    Button("Skip Field") { assignValue(nil) } // Call helper with nil
                     Spacer()
                 }
                 .padding()
 
             } // End main VStack
-            .navigationTitle("Assign \(fieldName)")
+            .navigationTitle("Assign \(fieldName)") // Set dynamic title
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel All") { isPresented = false } // Simply dismiss
+                    // Cancel button dismisses the entire assignment flow
+                    Button("Cancel All") {
+                        print("Cancelling assignment flow.")
+                        isPresented = false
+                    }
                 }
             }
         } // End NavigationView
     } // End body
 
     // MARK: - Subview Builder for List Buttons
+    /// Creates a button for each OCR string in the list.
     @ViewBuilder
     private func ocrStringButton(_ ocrString: String) -> some View {
         Button {
-            selectAndAssign(ocrString)
+            selectAndAssign(ocrString) // Call helper for visual feedback + assignment
         } label: {
              HStack {
                 Text(ocrString)
                 Spacer()
+                // Show temporary checkmark when selected
                 if recentlySelected == ocrString {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundColor(.green)
@@ -114,46 +132,56 @@ struct FieldAssignmentView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(8)
+            // Highlight background briefly on selection
             .background(recentlySelected == ocrString ? Color.green.opacity(0.3) : Color(uiColor: .systemGray6))
             .cornerRadius(5)
+            // Apply subtle scale effect on selection
             .scaleEffect(recentlySelected == ocrString ? 1.03 : 1.0)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.plain) // Make it look like a list item
     }
 
-    // MARK: - Helper Functions (Full Implementation)
+    // MARK: - Helper Functions
 
     /// Handles visual selection feedback and triggers assignment callback after a delay.
     private func selectAndAssign(_ value: String?) {
-        guard let actualValue = value else { return } // Require value
-        // No local isAssigning state to check/set
+        guard let actualValue = value else { return } // Needs a non-nil value to select
 
-        recentlySelected = actualValue // Trigger visual feedback
+        recentlySelected = actualValue // Trigger animation state
 
+        // Use asyncAfter to allow animation to show before calling back
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-            onAssign(actualValue) // Call parent's assignment logic
-            // Don't need to manage isAssigning or recentlySelected reset here, parent handles flow
+            onAssign(actualValue) // Callback to ViewModel
+            // recentlySelected = nil // Optionally reset here or rely on view disappearing/updating
         }
     }
 
      /// Handles assignment for manual entry or skip, calling the parent callback immediately.
      private func assignValue(_ value: String?) {
          let valueToAssign = value?.trimmingCharacters(in: .whitespacesAndNewlines)
-         // Only assign non-empty manual entry, or nil for skip
-         if valueToAssign?.isEmpty ?? false, value != nil {
+
+         // Don't assign if manual entry is empty (unless it's a skip)
+         if value != nil && (valueToAssign?.isEmpty ?? true) {
               print("Manual entry is empty, not assigning.")
-              return // Don't assign empty string from manual field
+              return
          }
-         onAssign(valueToAssign) // Pass back trimmed manual value or nil for skip
+
+         onAssign(valueToAssign) // Callback to ViewModel (passes nil for skip)
+
+         // Clear manual entry field if it was just assigned
+         if value != nil {
+              manualEntry = ""
+         }
      }
 
-     /// Helper to make dictionary keys more readable
+     /// Helper to make dictionary keys more readable for display.
      private func userFriendlyFieldName(_ key: String) -> String {
          switch key {
              case "mfgDate": return "Mfg Date"
              case "voltage": return "Voltage"
              case "amps": return "Amps"
              case "pressure": return "Pressure"
+             // Add other key->name mappings if needed
              default: return key.capitalized // Fallback
          }
      }
