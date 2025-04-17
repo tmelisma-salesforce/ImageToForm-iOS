@@ -19,6 +19,23 @@ struct EquipmentInfoView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) { // Add spacing for sections
 
+                // --- NEW: Conditional Show Manual Button ---
+                // Visible only after assignment completes successfully
+                if viewModel.showManualButton {
+                    Button {
+                        viewModel.displayManual() // Call ViewModel action
+                    } label: {
+                        // Use Label for icon + text
+                        Label("Show Equipment Manual", systemImage: "book.closed")
+                            .frame(maxWidth: .infinity) // Make button wide
+                    }
+                    .buttonStyle(.bordered) // Use bordered style
+                    .padding(.horizontal) // Add padding
+                    .padding(.top) // Add padding above the button
+                }
+                // --- End Show Manual Button ---
+
+
                 // Display the Form Subview, passing the ViewModel
                 EquipmentFormView(viewModel: viewModel)
 
@@ -35,9 +52,7 @@ struct EquipmentInfoView: View {
                             .font(.caption)
                     } else {
                         VStack(alignment: .leading) {
-                            // Access ViewModel's properties
                             ForEach(viewModel.ocrObservations, id: \.uuid) { obs in
-                                // Assuming RecognizedTextObservation has topCandidates & string
                                 Text(obs.topCandidates(1).first?.string ?? "??")
                                     .font(.caption)
                             }
@@ -55,36 +70,30 @@ struct EquipmentInfoView: View {
 
         // 1. Show Camera via Full Screen Cover
         .fullScreenCover(isPresented: $viewModel.showCamera) {
-            // Ensure ImagePicker.swift exists and is correct
             ImagePicker(selectedImage: Binding(
                 get: { viewModel.capturedEquipmentImage },
-                set: { newImage in viewModel.imageCaptured(newImage) } // Call ViewModel action
+                set: { newImage in viewModel.imageCaptured(newImage) }
             ), isFrontCamera: false)
         }
 
         // 2. Show OCR Preview via Sheet
         .sheet(isPresented: $viewModel.showOcrPreview) {
             if let image = viewModel.capturedEquipmentImage {
-                 // Ensure OcrPreviewView.swift exists and is correct
                  OcrPreviewView(
                      image: image,
-                     observations: viewModel.ocrObservations, // Use ViewModel data
-                     onRetake: viewModel.retakePhoto,         // Call ViewModel action
-                     onProceed: viewModel.proceedWithOcrResults // Call ViewModel action
+                     observations: viewModel.ocrObservations,
+                     onRetake: viewModel.retakePhoto,
+                     onProceed: viewModel.proceedWithOcrResults
                  )
-             } else {
-                  Text("Error: Missing image for preview.") // Fallback
-                  Button("Dismiss") { viewModel.showOcrPreview = false }.padding()
              }
         }
 
         // 3. Show Auto-Parse Review via Sheet
         .sheet(isPresented: $viewModel.showAutoParseReview) {
-            // Ensure AutoParseReviewView.swift exists and is correct
             AutoParseReviewView(
-                isPresented: $viewModel.showAutoParseReview, // Binding to dismiss
-                autoParsedData: viewModel.initialAutoParsedData, // Pass parsed data
-                onAccept: viewModel.acceptAutoParseAndProceedToAssignment // Pass action
+                isPresented: $viewModel.showAutoParseReview,
+                autoParsedData: viewModel.initialAutoParsedData,
+                onAccept: viewModel.acceptAutoParseAndProceedToAssignment
             )
         }
 
@@ -92,20 +101,27 @@ struct EquipmentInfoView: View {
         .sheet(isPresented: $viewModel.isAssigningFields) {
              if viewModel.currentAssignmentIndex < viewModel.fieldsToAssign.count {
                  let currentField = viewModel.fieldsToAssign[viewModel.currentAssignmentIndex]
-                 // Filter list based on ViewModel state
                  let availableOcrStrings = viewModel.allOcrStrings.filter { !viewModel.assignedOcrValues.contains($0) }
-                 // Ensure FieldAssignmentView.swift exists and is correct
                  FieldAssignmentView(
-                     isPresented: $viewModel.isAssigningFields, // Pass binding
+                     isPresented: $viewModel.isAssigningFields,
                      allOcrStrings: availableOcrStrings,
                      fieldName: currentField.name,
-                     onAssign: viewModel.handleAssignment, // Pass ViewModel method
-                     autoParsedData: viewModel.initialAutoParsedData // Pass already parsed data for display
+                     onAssign: viewModel.handleAssignment,
+                     autoParsedData: viewModel.initialAutoParsedData // Pass auto-parsed for display
                  )
              }
         }
 
-        // 5. Overlay for Processing Indicator
+        // --- NEW: Sheet for Manual View ---
+        // 5. Show Manual View
+        .sheet(isPresented: $viewModel.showManualView) {
+            // Ensure ManualView.swift exists
+            ManualView()
+        }
+        // --- End Manual View Sheet ---
+
+
+        // 6. Overlay for Processing Indicator
         .overlay {
             if viewModel.isProcessing {
                 // Ensure ProcessingIndicatorView.swift exists

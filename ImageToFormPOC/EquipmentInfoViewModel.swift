@@ -9,7 +9,7 @@
 import SwiftUI
 import Vision
 import CoreGraphics
-import CoreML // Ensure CoreML is imported if Resnet50 class is used (even if commented out later)
+import CoreML
 
 // Represents a field needing assignment
 struct AssignableField: Identifiable {
@@ -39,13 +39,16 @@ class EquipmentInfoViewModel: ObservableObject {
     @Published var showAutoParseReview = false // Controls Auto-Parse Review Sheet
     @Published var isAssigningFields: Bool = false // Triggers the assignment sheet
     @Published var currentAssignmentIndex: Int = 0
+    @Published var showManualButton: Bool = false // Controls button visibility
+    @Published var showManualView: Bool = false   // Controls manual sheet presentation
+
 
     // MARK: - Data State
-    @Published var ocrObservations: [RecognizedTextObservation] = [] // Holds results from Vision OCR
-    @Published var allOcrStrings: [String] = [] // Holds all raw strings for assignment UI
-    @Published var fieldsToAssign: [AssignableField] = [] // Holds fields needing manual assignment
-    @Published var assignedOcrValues = Set<String>() // Tracks OCR strings used in assignment
-    @Published var initialAutoParsedData: [String: String] = [:] // Holds values from initial parse
+    @Published var ocrObservations: [RecognizedTextObservation] = [] // New type
+    @Published var allOcrStrings: [String] = []
+    @Published var fieldsToAssign: [AssignableField] = []
+    @Published var assignedOcrValues = Set<String>()
+    @Published var initialAutoParsedData: [String: String] = [:]
 
 
     // MARK: - Actions from UI
@@ -64,9 +67,9 @@ class EquipmentInfoViewModel: ObservableObject {
             return
         }
         print("ViewModel: Image captured. Storing image and starting OCR Task.")
-        self.capturedEquipmentImage = capturedImage // Store the image
-        Task { // Launch background task for Vision
-            self.isProcessing = true // Show indicator
+        self.capturedEquipmentImage = capturedImage
+        Task {
+            self.isProcessing = true
             await performOCROnly(on: capturedImage)
             // isProcessing state is handled within performOCROnly or subsequent methods
         }
@@ -100,6 +103,7 @@ class EquipmentInfoViewModel: ObservableObject {
         print("Form fields updated with auto-parsed data. Initial assigned values: \(initialAssignedValues)")
 
         // Trigger Auto-Parse Review Sheet
+        // Always show review, even if empty, so user explicitly accepts
         self.showAutoParseReview = true
         self.isProcessing = false // Hide indicator while user reviews
         print("Triggering Auto-Parse Review UI.")
@@ -110,15 +114,14 @@ class EquipmentInfoViewModel: ObservableObject {
     func acceptAutoParseAndProceedToAssignment() {
         print("ViewModel: Auto-parsed results accepted. Determining remaining fields...")
         self.showAutoParseReview = false // Dismiss the review sheet
-        // isProcessing indicator can remain off, assignment is interactive
+        // isProcessing indicator off, assignment is interactive
 
         // Determine Fields Still Needing Assignment (based on current form state)
         var remainingFields: [AssignableField] = []
         if self.make.isEmpty { remainingFields.append(AssignableField(key: "make", name: "Make")) }
         if self.model.isEmpty { remainingFields.append(AssignableField(key: "model", name: "Model")) }
         if self.serialNumber.isEmpty { remainingFields.append(AssignableField(key: "serialNumber", name: "Serial Number")) }
-        // Add checks for other fields here if their auto-parse was unreliable
-        // e.g., if manufacturingDateString.isEmpty { remainingFields.append(...) }
+        // Add others if needed
 
         print("Fields needing assignment: \(remainingFields.map { $0.name })")
         self.fieldsToAssign = remainingFields
@@ -131,6 +134,7 @@ class EquipmentInfoViewModel: ObservableObject {
         } else {
             print("No fields require manual assignment. Process complete.")
             self.isAssigningFields = false
+            self.showManualButton = true // Show manual button if NO assignment needed
             // isProcessing remains false
         }
     }
@@ -146,18 +150,17 @@ class EquipmentInfoViewModel: ObservableObject {
 
     /// Called by FieldAssignmentView when user assigns or skips a field.
     func handleAssignment(assignedValue: String?) {
-        // Ensure execution on MainActor (already guaranteed by class)
+        // Ensure execution on MainActor
         guard currentAssignmentIndex < fieldsToAssign.count else {
             print("ViewModel Error: Assignment index out of bounds.")
             finishAssignment()
             return
         }
         let currentField = fieldsToAssign[currentAssignmentIndex]
-        // Get assigned value (trimmed) or empty string if skipped/nil
         let valueToAssign = assignedValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         print("ViewModel: Handling assignment for '\(currentField.name)': Value='\(valueToAssign)' (Skipped=\(assignedValue == nil))")
 
-        // Update the correct @Published property based on field key
+        // Update the correct @Published property
         switch currentField.key {
         case "make": self.make = valueToAssign
         case "model": self.model = valueToAssign
@@ -166,20 +169,18 @@ class EquipmentInfoViewModel: ObservableObject {
         }
 
         // Track the assigned OCR value (if not skipped and not empty)
-        // This prevents showing already used values in subsequent assignment steps
         if assignedValue != nil && !valueToAssign.isEmpty {
              assignedOcrValues.insert(valueToAssign)
              print("ViewModel: Added '\(valueToAssign)' to assigned values. Current set: \(assignedOcrValues)")
         }
 
-        // Move to the next field or finish assignment flow
+        // Move to the next field or finish
         currentAssignmentIndex += 1
         if currentAssignmentIndex >= fieldsToAssign.count {
-            finishAssignment()
+            finishAssignment() // Call the dedicated finish method
         } else {
             print("ViewModel: Moving to next field assignment: \(fieldsToAssign[currentAssignmentIndex].name)")
-            // The assignment sheet (@State isAssigningFields) remains presented,
-            // its content will update because its inputs (fieldName, filtered list) change.
+            // State update triggers UI refresh in sheet automatically
         }
     }
 
@@ -187,7 +188,22 @@ class EquipmentInfoViewModel: ObservableObject {
      func finishAssignment() {
         print("ViewModel: Assignment flow finished or cancelled.")
         isAssigningFields = false // Dismiss the assignment sheet
-        isProcessing = false // Ensure processing indicator is definitely off
+        isProcessing = false // Ensure processing indicator is off
+
+        // Show manual button ONLY if assignment finished successfully (reached end)
+        if currentAssignmentIndex >= fieldsToAssign.count {
+            print("ViewModel: Setting showManualButton = true")
+            showManualButton = true
+        } else {
+             print("ViewModel: Assignment cancelled early, not showing manual button.")
+             showManualButton = false
+        }
+    }
+
+     /// Triggers the presentation of the manual view.
+    func displayManual() {
+        print("ViewModel: Displaying manual.")
+        showManualView = true
     }
 
 
@@ -204,9 +220,11 @@ class EquipmentInfoViewModel: ObservableObject {
         self.isAssigningFields = false
         self.isProcessing = false
         self.assignedOcrValues = Set<String>()
-        self.initialAutoParsedData = [:] // Clear auto-parsed cache
-        self.showOcrPreview = false // Ensure preview sheet state is reset
-        self.showAutoParseReview = false // Ensure auto-parse review state is reset
+        self.initialAutoParsedData = [:]
+        self.showOcrPreview = false
+        self.showAutoParseReview = false
+        self.showManualButton = false // Reset manual button state
+        self.showManualView = false   // Reset manual view presentation state
         clearFormFields()
     }
 
@@ -222,70 +240,58 @@ class EquipmentInfoViewModel: ObservableObject {
         // Ensure execution on MainActor
         guard let cgImage = image.cgImage else {
             print("ViewModel Error: Failed to get CGImage.")
-            isProcessing = false // Stop processing on early exit
+            isProcessing = false
             return
         }
         let imageOrientation = cgOrientation(from: image.imageOrientation)
         print("ViewModel: Starting Vision Text Recognition (New API)...")
 
-        // Create and configure the text recognition request struct
         var textRequest = RecognizeTextRequest()
         textRequest.recognitionLevel = .accurate
         textRequest.usesLanguageCorrection = true
 
         do {
-            // Perform the request using async/await directly on the request struct
             let results: [RecognizedTextObservation] = try await textRequest.perform(on: cgImage, orientation: imageOrientation)
-            // Code after await is guaranteed on MainActor due to func signature
-
             print("ViewModel OCR success: Found \(results.count) observations.")
-            self.ocrObservations = results // Store the results
-
-            // Trigger the OCR Preview sheet ONLY if text was actually found
+            self.ocrObservations = results
             if !results.isEmpty {
-                 self.showOcrPreview = true
-                 // isProcessing remains true - user must Proceed or Retake from preview
+                 self.showOcrPreview = true // Trigger preview
             } else {
-                 print("ViewModel: No text found by OCR, skipping preview.")
-                 self.showOcrPreview = false
+                 self.showOcrPreview = false // Skip preview if no text
                  isProcessing = false // Stop processing if no text found
             }
-
         } catch {
-            // Handle errors during OCR performance
             print("ViewModel Error: Failed to perform Vision request: \(error.localizedDescription)")
             self.ocrObservations = []
             isProcessing = false // Stop processing on error
-            // Consider showing an error alert to the user here
         }
         print("ViewModel: OCR function finished.")
+        // isProcessing remains true only if showOcrPreview becomes true
+        if !self.showOcrPreview {
+            isProcessing = false
+        }
     }
 
     /// Parses only high-confidence patterns (Date, V, A, PSI) from OCR results. Internal access.
     func parseHighConfidenceInfo(from observations: [RecognizedTextObservation]) -> (parsedData: [String: String], allLines: [String]) {
         var parsedData: [String: String] = [:]
-        // Extract clean, non-empty lines from observations
-        let allTextLines = observations.compactMap {
-            $0.topCandidates(1).first?.string.trimmingCharacters(in: .whitespacesAndNewlines)
-        }.filter { !$0.isEmpty }
+        let allTextLines = observations.compactMap { $0.topCandidates(1).first?.string.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
 
         print("--- Raw OCR Lines for Parsing (High Confidence Pass) ---")
         allTextLines.forEach { print($0) }
         print("--------------------------------------------------------")
 
-        // Apply specific regex patterns to find high-confidence values
         for line in allTextLines {
-            // Pressure (e.g., "175 PSI", "150psi")
+            // Pressure (Number followed by PSI)
             if parsedData["pressure"] == nil,
                let match = line.range(of: #"(\d+(\.\d+)?\s?PSI)"#, options: [.regularExpression, .caseInsensitive]) {
                  let value = String(line[match]).trimmingCharacters(in: .whitespaces)
-                 // Basic check to ensure we captured digits
                  if value.rangeOfCharacter(from: .decimalDigits) != nil {
                       parsedData["pressure"] = value
                       print("Regex found Pressure: \(value)")
                  }
             }
-            // Voltage (e.g., "460 V", "120VAC", "240V")
+            // Voltage (Number followed by V/VAC/VDC)
             if parsedData["voltage"] == nil,
                let match = line.range(of: #"(\d+(\.\d+)?\s?V(AC|DC)?)"#, options: [.regularExpression, .caseInsensitive]),
                String(line[match]).rangeOfCharacter(from: .decimalDigits) != nil {
@@ -293,7 +299,7 @@ class EquipmentInfoViewModel: ObservableObject {
                  parsedData["voltage"] = value
                  print("Regex found Voltage: \(value)")
             }
-             // Amps (e.g., "32 A", "15Amps")
+             // Amps (Number followed by A/Amps)
              if parsedData["amps"] == nil,
                 let match = line.range(of: #"(\d+(\.\d+)?\s?A(mps)?)"#, options: [.regularExpression, .caseInsensitive]),
                  String(line[match]).rangeOfCharacter(from: .decimalDigits) != nil {
@@ -301,7 +307,7 @@ class EquipmentInfoViewModel: ObservableObject {
                   parsedData["amps"] = value
                   print("Regex found Amps: \(value)")
              }
-             // Date (YYYY-MM or YYYY/MM, anchored to line start/end for confidence)
+             // Date (YYYY-MM or YYYY/MM format, anchored)
               if parsedData["mfgDate"] == nil,
                  let match = line.trimmingCharacters(in: .whitespaces).range(of: #"^\d{4}[-/]\d{1,2}$"#, options: .regularExpression) {
                    let value = String(line.trimmingCharacters(in: .whitespaces)[match])
@@ -309,13 +315,11 @@ class EquipmentInfoViewModel: ObservableObject {
                    print("Regex found Date: \(value)")
               }
         }
-        // Return dictionary of parsed values and the complete list of raw lines
         return (parsedData, allTextLines)
     }
 
     /// Updates the main form's @State variables based on initially parsed data. Marked private.
     private func updateFormFields(with parsedData: [String: String]) {
-        // Only update fields targeted by the high-confidence parser
         if let val = parsedData["mfgDate"], !val.isEmpty { self.manufacturingDateString = val }
         if let val = parsedData["voltage"], !val.isEmpty { self.voltageString = val }
         if let val = parsedData["amps"], !val.isEmpty { self.ampsString = val }
