@@ -5,9 +5,9 @@ import SwiftUI
 // MARK: - Main View
 struct ProtectiveGearView: View {
 
-    // Use the corrected ViewModel (assuming previous fixes are applied)
+    // Use the corrected ViewModel
     @StateObject private var viewModel = ProtectiveGearViewModel()
-    @State private var showingCameraOptions = false // This state is now relevant again
+    @State private var showingCameraOptions = false
 
     var body: some View {
         NavigationView {
@@ -17,42 +17,34 @@ struct ProtectiveGearView: View {
                     .fontWeight(.medium)
                     .padding(.bottom)
 
-                // ChecklistView is uncommented
                 ChecklistView(
                     isHelmetChecked: viewModel.isHelmetChecked,
                     isGlovesChecked: viewModel.isGlovesChecked,
                     isBootsChecked: viewModel.isBootsChecked
                 )
 
-                Spacer() // Pushes button to the bottom
+                Spacer()
 
-                // CheckGearButton is uncommented
                 CheckGearButton(
                     isProcessing: viewModel.isProcessing,
                     action: {
-                        showingCameraOptions = true // Show camera selection
+                        showingCameraOptions = true
                     }
                 )
                 .padding(.bottom)
 
             } // End main VStack
-            .padding() // Overall padding
+            .padding()
             .navigationTitle("Verify Protective Gear")
             .navigationBarTitleDisplayMode(.inline)
-
-            // .confirmationDialog is uncommented
             .confirmationDialog("Select Camera", isPresented: $showingCameraOptions, titleVisibility: .visible) {
                 Button("Selfie (Check Helmet/Gloves)") { viewModel.initiateScan(useFrontCamera: true) }
                 Button("Rear Camera (Check Boots/Feet)") { viewModel.initiateScan(useFrontCamera: false) }
                 Button("Cancel", role: .cancel) { }
             }
-
-            // .fullScreenCover is uncommented
             .fullScreenCover(isPresented: $viewModel.showCamera) {
                 ImagePicker(selectedImage: $viewModel.selfieImage, isFrontCamera: viewModel.isFrontCamera)
             }
-
-            // .onChange is uncommented
              .onChange(of: viewModel.selfieImage) { _, newImage in
                   if let image = newImage {
                        viewModel.imageCaptured(image)
@@ -60,30 +52,27 @@ struct ProtectiveGearView: View {
                        print("ProtectiveGearView: onChange detected selfieImage became nil.")
                   }
              }
-
-             // .sheet is uncommented
+             // --- UPDATED: Pass lastScanWasFrontCamera to sheet content ---
              .sheet(isPresented: $viewModel.showDetectionPreview) {
-                  // Ensure the preview view gets the correct data from the ViewModel
                   if let image = viewModel.selfieImage {
                        ObjectDetectionPreviewView(
                            image: image,
-                           detectedObjects: viewModel.objectsForPreview, // Use filtered list
-                           previewMessage: viewModel.previewMessage,     // Pass the message
-                           onRetake: viewModel.retakePhoto,      // Pass method reference
-                           onProceed: viewModel.proceedFromPreview // Pass method reference
+                           detectedObjects: viewModel.objectsForPreview,
+                           previewMessage: viewModel.previewMessage,
+                           // Pass the flag indicating if the *last completed scan* used the front camera
+                           isFrontCameraImage: viewModel.lastScanWasFrontCamera,
+                           onRetake: viewModel.retakePhoto,
+                           onProceed: viewModel.proceedFromPreview
                        )
                   }
              }
-
-             // .overlay is uncommented
+             // --- END UPDATE ---
              .overlay {
                  if viewModel.isProcessing {
                       ProcessingIndicatorView()
                  }
              }
-
-             // .alert is uncommented
-             .alert("Insufficient Gear", isPresented: $viewModel.showFlipFlopErrorAlert) { // Use correct flag
+             .alert("Insufficient Gear", isPresented: $viewModel.showFlipFlopErrorAlert) {
                   Button("OK", role: .cancel) { }
              } message: {
                   Text("Flip-flops were detected. Boots are required for proper foot protection.")
@@ -94,7 +83,7 @@ struct ProtectiveGearView: View {
 } // End ProtectiveGearView struct
 
 
-// MARK: - Child View: Checklist (Keep definition)
+// MARK: - Child View: Checklist
 struct ChecklistView: View {
     let isHelmetChecked: Bool
     let isGlovesChecked: Bool
@@ -108,7 +97,7 @@ struct ChecklistView: View {
     }
 }
 
-// MARK: - Child View: Checklist Item (Keep definition)
+// MARK: - Child View: Checklist Item
 struct ChecklistItem: View {
     let label: String
     let isChecked: Bool
@@ -124,7 +113,7 @@ struct ChecklistItem: View {
     }
 }
 
-// MARK: - Child View: Check Gear Button (Keep definition)
+// MARK: - Child View: Check Gear Button
 struct CheckGearButton: View {
     let isProcessing: Bool
     let action: () -> Void
@@ -140,13 +129,13 @@ struct CheckGearButton: View {
 }
 
 
-// MARK: - Preview (Reintroduced)
-// --- Debug: Reintroduce #Preview ---
+// MARK: - Preview
+// Re-enable preview if build hangs are resolved, or keep commented out.
+/*
 #Preview {
     NavigationView {
-        // Using the default initializer which should be fine if model loading is handled robustly
         ProtectiveGearView()
     }
 }
-// --- End Reintroduce #Preview ---
+*/
 

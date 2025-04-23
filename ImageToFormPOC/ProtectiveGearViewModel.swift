@@ -14,12 +14,11 @@ import CoreGraphics
 // Note: Requires iOS 18.0+ / macOS 15.0+ for CoreMLRequest, CoreMLModelContainer etc.
 
 // --- Define DetectedObject Struct Here (Single Source of Truth) ---
-// This struct is populated directly from Vision observations.
 struct DetectedObject: Identifiable {
     let id = UUID()
-    let label: String        // e.g., "helmet", "glove"
-    let confidence: Float    // Combined confidence
-    let boundingBox: CGRect // Normalized Rect (0-1), TOP-LEFT origin from Vision observation
+    let label: String
+    let confidence: Float
+    let boundingBox: CGRect // Expecting a standard CGRect
 }
 // --- End DetectedObject Definition ---
 
@@ -30,24 +29,23 @@ class ProtectiveGearViewModel: ObservableObject {
     // MARK: - Published State (UI Facing)
     @Published var selfieImage: UIImage? = nil
     @Published var isProcessing = false
-    @Published var detectionErrorMessage: String? = nil // For technical errors
-    @Published var showCamera = false // Controls ImagePicker presentation
-    @Published var showDetectionPreview = false // Controls ObjectDetectionPreviewView presentation
+    @Published var detectionErrorMessage: String? = nil
+    @Published var showCamera = false
+    @Published var showDetectionPreview = false
 
     // --- Checklist State ---
     @Published var isHelmetChecked: Bool = false
     @Published var isGlovesChecked: Bool = false
     @Published var isBootsChecked: Bool = false
-    @Published var showFlipFlopErrorAlert: Bool = false // Controls the alert in the main view
+    @Published var showFlipFlopErrorAlert: Bool = false
 
     // --- State for Preview ---
-    // Uses the DetectedObject struct defined above
-    @Published var objectsForPreview: [DetectedObject] = [] // Filtered objects for the current preview
-    @Published var previewMessage: String? = nil // Message to show in the preview (e.g., "No gear detected")
+    @Published var objectsForPreview: [DetectedObject] = []
+    @Published var previewMessage: String? = nil
 
     // MARK: - Internal State
-    var isFrontCamera: Bool = false // Track which camera was requested for the scan (Made internal, not private)
-    private var lastScanWasFrontCamera: Bool = false // Track which camera was used for the *completed* scan
+    var isFrontCamera: Bool = false
+    private(set) var lastScanWasFrontCamera: Bool = false
 
     // --- Temporary Findings (Internal) ---
     private var foundHelmetInLastScan = false
@@ -56,11 +54,9 @@ class ProtectiveGearViewModel: ObservableObject {
     private var foundFlipFlopsInLastScan = false
 
     // MARK: - Dependencies
-    // REMOVED: Parser is no longer needed as we process Vision results directly
     private var coreMLModel: MLModel?
     private var modelContainer: CoreMLModelContainer?
 
-    // Define expected class labels (ensure these match model output identifiers)
     private let expectedLabels: Set<String> = ["flip-flops", "helmet", "glove", "boots"]
 
     // MARK: - Initialization
@@ -96,7 +92,7 @@ class ProtectiveGearViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Actions from UI (No changes needed in this section)
+    // MARK: - Actions from UI
 
     func initiateScan(useFrontCamera: Bool) {
         print("ViewModel: Initiating scan (useFrontCamera: \(useFrontCamera))")
@@ -148,7 +144,7 @@ class ProtectiveGearViewModel: ObservableObject {
         print("ViewModel: Proceed complete. Checklist state updated.")
     }
 
-    // MARK: - Internal State Reset (No changes needed in this section)
+    // MARK: - Internal State Reset
 
     private func resetStateBeforeScan() {
         print("ViewModel: Resetting state before new scan.")
@@ -172,6 +168,7 @@ class ProtectiveGearViewModel: ObservableObject {
         self.isGlovesChecked = false
         self.isBootsChecked = false
         self.showFlipFlopErrorAlert = false
+        self.lastScanWasFrontCamera = false
     }
 
 
@@ -186,9 +183,11 @@ class ProtectiveGearViewModel: ObservableObject {
             updateDetectionState(detections: [], error: "Failed to convert image.")
             return
         }
-        let imageOrientation = cgOrientation(from: image.imageOrientation)
 
-        print("ProtectiveGearViewModel: Starting Object Detection Task (CoreMLRequest)...")
+        let visionOrientation = cgOrientation(from: image.imageOrientation)
+        print("ProtectiveGearViewModel DEBUG: Original UIImage Orientation: \(image.imageOrientation.rawValue)")
+        print("ProtectiveGearViewModel DEBUG: Passing orientation \(visionOrientation.rawValue) to Vision request.")
+
         self.isProcessing = true
         self.detectionErrorMessage = nil
         self.objectsForPreview = []
@@ -200,53 +199,47 @@ class ProtectiveGearViewModel: ObservableObject {
 
         do {
             let request = CoreMLRequest(model: loadedModelContainer)
-            print("ProtectiveGearViewModel DEBUG: Performing CoreMLRequest directly...")
+            print("ProtectiveGearViewModel DEBUG: Performing CoreMLRequest directly with orientation \(visionOrientation.rawValue)...")
 
-            // Let Swift infer the type as CoreMLRequest.Result (aka [any VisionObservation])
-            let visionObservations = try await request.perform(on: cgImage, orientation: imageOrientation)
+            // Let Swift infer the type [any VisionObservation]
+            let visionObservations = try await request.perform(on: cgImage, orientation: visionOrientation)
 
             print("ProtectiveGearViewModel DEBUG: CoreMLRequest perform completed. Received \(visionObservations.count) observations.")
 
             var detectedObjectsFromVision: [DetectedObject] = []
-            // Loop iterates through the inferred [any VisionObservation] array
             for observation in visionObservations {
-                // Use conditional cast (as?) to check if the element is the expected type
                 guard let recognizedObjectObservation = observation as? RecognizedObjectObservation else {
                     print("ProtectiveGearViewModel DEBUG: Skipping observation of type \(type(of: observation)). Expected RecognizedObjectObservation.")
                     continue
                 }
 
-                // Now we know it's a RecognizedObjectObservation
-                guard let topLabel = recognizedObjectObservation.labels.max(by: { $0.confidence < $1.confidence }) else {
-                    print("ProtectiveGearViewModel DEBUG: Observation \(recognizedObjectObservation.uuid) has no labels. Skipping.")
-                    continue
-                }
-
-                guard expectedLabels.contains(topLabel.identifier) else {
-                     print("ProtectiveGearViewModel DEBUG: Top label '\(topLabel.identifier)' (Conf: \(topLabel.confidence)) is not in expectedLabels. Skipping.")
-                     continue
-                }
+                guard let topLabel = recognizedObjectObservation.labels.max(by: { $0.confidence < $1.confidence }) else { continue }
+                guard expectedLabels.contains(topLabel.identifier) else { continue }
 
                 let combinedConfidence = recognizedObjectObservation.confidence * topLabel.confidence
 
-                // --- CORRECTED: Access the .cgRect property of the NormalizedRect ---
-                let box = recognizedObjectObservation.boundingBox.cgRect // Get the underlying CGRect
+                // --- CORRECTED: Construct CGRect from components ---
+                // Access components directly from the boundingBox (NormalizedRect)
+                let box = CGRect(
+                    x: recognizedObjectObservation.boundingBox.origin.x,
+                    y: recognizedObjectObservation.boundingBox.origin.y,
+                    width: recognizedObjectObservation.boundingBox.width,
+                    height: recognizedObjectObservation.boundingBox.height
+                )
                 // --- END CORRECTION ---
 
-                // --- Use the extracted CGRect in the initializer ---
+                // Initialize DetectedObject with the newly constructed CGRect
                 let detectedObject = DetectedObject(
                     label: topLabel.identifier,
                     confidence: combinedConfidence,
-                    boundingBox: box // Use the extracted CGRect
+                    boundingBox: box // Use the constructed CGRect
                 )
-                // --- END CHANGE ---
 
                 detectedObjectsFromVision.append(detectedObject)
                 print("ProtectiveGearViewModel DEBUG: Added DetectedObject: \(detectedObject.label) (Conf: \(String(format: "%.2f", detectedObject.confidence))) Box: \(detectedObject.boundingBox)")
             }
 
             print("Processing complete. Found: \(detectedObjectsFromVision.count) relevant detections.")
-            // Pass nil error explicitly if successful
             updateDetectionState(detections: detectedObjectsFromVision, error: nil)
 
         } catch {
@@ -255,10 +248,10 @@ class ProtectiveGearViewModel: ObservableObject {
         }
     } // End performCoreMLRequest
 
-    // MARK: - updateDetectionState (No changes needed here)
+    // MARK: - updateDetectionState
     private func updateDetectionState(detections: [DetectedObject], error: String?) {
         print("Updating state on main actor after detection...")
-        self.detectionErrorMessage = error // Store any technical error
+        self.detectionErrorMessage = error
 
         var relevantObjectsForPreview: [DetectedObject] = []
         var message: String? = nil
@@ -278,7 +271,7 @@ class ProtectiveGearViewModel: ObservableObject {
             if !foundHelmetInLastScan && !foundGloveInLastScan {
                 message = "No helmet or gloves detected."
             }
-        } else {
+        } else { // Rear camera
             relevantObjectsForPreview = detections.filter { $0.label == "boots" || $0.label == "flip-flops" }
             if foundFlipFlopsInLastScan {
                 message = "Flip-flops detected. Not suitable protective gear."
@@ -288,7 +281,6 @@ class ProtectiveGearViewModel: ObservableObject {
         }
 
         self.objectsForPreview = relevantObjectsForPreview
-        // Show the generated message, or the technical error if one occurred
         self.previewMessage = message ?? self.detectionErrorMessage
 
         self.showDetectionPreview = true
@@ -297,12 +289,20 @@ class ProtectiveGearViewModel: ObservableObject {
         print("Triggering detection preview (\(relevantObjectsForPreview.count) objects for preview, message: \(self.previewMessage ?? "None")).")
     }
 
-    // MARK: - Orientation Helper (No changes needed here)
+    // MARK: - Orientation Helper
     private func cgOrientation(from uiOrientation: UIImage.Orientation) -> CGImagePropertyOrientation {
          switch uiOrientation {
-            case .up: return .up; case .down: return .down; case .left: return .left; case .right: return .right;
-            case .upMirrored: return .upMirrored; case .downMirrored: return .downMirrored; case .leftMirrored: return .leftMirrored; case .rightMirrored: return .rightMirrored;
-            @unknown default: print("Warning: Unknown UIImage.Orientation (\(uiOrientation.rawValue)), defaulting to .up"); return .up
+            case .up: return .up
+            case .down: return .down
+            case .left: return .left
+            case .right: return .right
+            case .upMirrored: return .upMirrored
+            case .downMirrored: return .downMirrored
+            case .leftMirrored: return .leftMirrored
+            case .rightMirrored: return .rightMirrored
+            @unknown default:
+                print("Warning: Unknown UIImage.Orientation (\(uiOrientation.rawValue)), defaulting to .up")
+                return .up
          }
     }
 
