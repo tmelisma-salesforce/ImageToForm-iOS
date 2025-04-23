@@ -5,8 +5,9 @@ import SwiftUI
 // MARK: - Main View
 struct ProtectiveGearView: View {
 
+    // Use the corrected ViewModel (assuming previous fixes are applied)
     @StateObject private var viewModel = ProtectiveGearViewModel()
-    @State private var showingCameraOptions = false
+    @State private var showingCameraOptions = false // This state is now relevant again
 
     var body: some View {
         NavigationView {
@@ -16,7 +17,7 @@ struct ProtectiveGearView: View {
                     .fontWeight(.medium)
                     .padding(.bottom)
 
-                // Instantiate ChecklistView, passing necessary state
+                // ChecklistView is uncommented
                 ChecklistView(
                     isHelmetChecked: viewModel.isHelmetChecked,
                     isGlovesChecked: viewModel.isGlovesChecked,
@@ -25,7 +26,7 @@ struct ProtectiveGearView: View {
 
                 Spacer() // Pushes button to the bottom
 
-                // Instantiate CheckGearButton, passing state and action closure
+                // CheckGearButton is uncommented
                 CheckGearButton(
                     isProcessing: viewModel.isProcessing,
                     action: {
@@ -38,20 +39,20 @@ struct ProtectiveGearView: View {
             .padding() // Overall padding
             .navigationTitle("Verify Protective Gear")
             .navigationBarTitleDisplayMode(.inline)
-            // --- Modifiers applied to the top-level content ---
+
+            // .confirmationDialog is uncommented
             .confirmationDialog("Select Camera", isPresented: $showingCameraOptions, titleVisibility: .visible) {
-                // Actions call viewModel methods directly from this scope
-                Button("Selfie (Check Helmet/Gloves)") {
-                    viewModel.initiateScan(useFrontCamera: true)
-                }
-                Button("Rear Camera (Check Boots/Feet)") {
-                    viewModel.initiateScan(useFrontCamera: false)
-                }
+                Button("Selfie (Check Helmet/Gloves)") { viewModel.initiateScan(useFrontCamera: true) }
+                Button("Rear Camera (Check Boots/Feet)") { viewModel.initiateScan(useFrontCamera: false) }
                 Button("Cancel", role: .cancel) { }
             }
+
+            // .fullScreenCover is uncommented
             .fullScreenCover(isPresented: $viewModel.showCamera) {
                 ImagePicker(selectedImage: $viewModel.selfieImage, isFrontCamera: viewModel.isFrontCamera)
             }
+
+            // .onChange is uncommented
              .onChange(of: viewModel.selfieImage) { _, newImage in
                   if let image = newImage {
                        viewModel.imageCaptured(image)
@@ -59,40 +60,47 @@ struct ProtectiveGearView: View {
                        print("ProtectiveGearView: onChange detected selfieImage became nil.")
                   }
              }
+
+             // .sheet is uncommented
              .sheet(isPresented: $viewModel.showDetectionPreview) {
+                  // Ensure the preview view gets the correct data from the ViewModel
                   if let image = viewModel.selfieImage {
                        ObjectDetectionPreviewView(
                            image: image,
-                           detectedObjects: viewModel.detectedObjects, // Pass filtered data
+                           detectedObjects: viewModel.objectsForPreview, // Use filtered list
+                           previewMessage: viewModel.previewMessage,     // Pass the message
                            onRetake: viewModel.retakePhoto,      // Pass method reference
                            onProceed: viewModel.proceedFromPreview // Pass method reference
                        )
                   }
              }
+
+             // .overlay is uncommented
              .overlay {
                  if viewModel.isProcessing {
                       ProcessingIndicatorView()
-                  }
+                 }
              }
-             .alert("Insufficient Gear", isPresented: $viewModel.showFlipFlopError) {
+
+             // .alert is uncommented
+             .alert("Insufficient Gear", isPresented: $viewModel.showFlipFlopErrorAlert) { // Use correct flag
                   Button("OK", role: .cancel) { }
              } message: {
                   Text("Flip-flops were detected. Boots are required for proper foot protection.")
              }
+
         } // End NavigationView
     } // End body
 } // End ProtectiveGearView struct
 
 
-// MARK: - Child View: Checklist
+// MARK: - Child View: Checklist (Keep definition)
 struct ChecklistView: View {
-    // Receives data as simple properties
     let isHelmetChecked: Bool
     let isGlovesChecked: Bool
     let isBootsChecked: Bool
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) { // Use VStack for layout if needed
+        VStack(alignment: .leading, spacing: 5) {
             ChecklistItem(label: "Helmet", isChecked: isHelmetChecked)
             ChecklistItem(label: "Gloves", isChecked: isGlovesChecked)
             ChecklistItem(label: "Boots", isChecked: isBootsChecked)
@@ -100,11 +108,10 @@ struct ChecklistView: View {
     }
 }
 
-// MARK: - Child View: Checklist Item (Unchanged)
+// MARK: - Child View: Checklist Item (Keep definition)
 struct ChecklistItem: View {
     let label: String
     let isChecked: Bool
-
     var body: some View {
         HStack {
             Image(systemName: isChecked ? "checkmark.square.fill" : "square")
@@ -117,13 +124,12 @@ struct ChecklistItem: View {
     }
 }
 
-// MARK: - Child View: Check Gear Button
+// MARK: - Child View: Check Gear Button (Keep definition)
 struct CheckGearButton: View {
     let isProcessing: Bool
-    let action: () -> Void // Action closure
-
+    let action: () -> Void
     var body: some View {
-        Button(action: action) { // Execute the closure on tap
+        Button(action: action) {
             Label("Check My Gear", systemImage: "camera.viewfinder")
                 .frame(maxWidth: .infinity)
         }
@@ -134,9 +140,13 @@ struct CheckGearButton: View {
 }
 
 
-// MARK: - Preview
+// MARK: - Preview (Reintroduced)
+// --- Debug: Reintroduce #Preview ---
 #Preview {
     NavigationView {
+        // Using the default initializer which should be fine if model loading is handled robustly
         ProtectiveGearView()
     }
 }
+// --- End Reintroduce #Preview ---
+
