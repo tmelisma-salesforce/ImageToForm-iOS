@@ -7,134 +7,155 @@
 //
 
 import SwiftUI
-import Vision
-import CoreGraphics
+import Vision // Required for text recognition (OCR) capabilities.
+import CoreGraphics // Required for CGImagePropertyOrientation.
 
-// Ensure Deployment Target is iOS 18.0+
+// Requires iOS 18.0+ for the Swift Concurrency-based Vision APIs.
 
+/// A view for capturing an image of a meter and extracting the reading using OCR.
 struct MeterReadingView: View {
+
     // MARK: - State Variables
+
+    /// Controls the presentation of the camera/image picker sheet.
     @State private var showCamera = false
+    /// Stores the image captured by the user via the camera or photo library.
     @State private var capturedImage: UIImage? = nil
+    /// Indicates whether the OCR process is currently running.
     @State private var isProcessing = false
+    /// Stores the numerical strings detected by the OCR process.
     @State private var detectedNumbers: [String] = []
+    /// Stores the currently selected meter reading from the detected numbers.
     @State private var selectedReading: String? = nil
-    @State private var confirmationMessage: String = "" // NEW: Holds confirmation text
+    /// Displays a confirmation message after the user confirms a reading.
+    @State private var confirmationMessage: String = ""
+
+    /// The target value used to automatically pre-select the most likely meter reading from the OCR results.
+    private let targetValue: Double = 10000.0
+
+    // MARK: - Body
 
     var body: some View {
-        VStack(spacing: 0) { // Use spacing 0 to make List and confirmation section adjacent
-            // List to display detected numbers and allow selection
-            List {
-                Section("Select Meter Reading (Largest Auto-Selected):") {
-                    if isProcessing {
-                        HStack { Spacer(); ProgressView(); Spacer() }
-                    } else if detectedNumbers.isEmpty {
-                        Text(capturedImage == nil ? "Tap 'Scan Meter' below." : "No numbers detected in image.")
-                            .foregroundColor(.gray)
-                    } else {
-                        ForEach(detectedNumbers, id: \.self) { numberString in
-                            Button {
-                                selectedReading = numberString
-                                confirmationMessage = "" // Clear confirmation when selection changes
-                                print("User manually selected reading: \(numberString)")
-                            } label: {
-                                HStack {
-                                    Text(numberString)
-                                        .fontWeight(selectedReading == numberString ? .bold : .regular)
-                                        .foregroundColor(selectedReading == numberString ? .blue : .primary)
-                                    Spacer()
-                                    if selectedReading == numberString {
-                                        Image(systemName: "checkmark")
-                                            .foregroundColor(.blue)
-                                            .fontWeight(.bold)
+        VStack(spacing: 20) {
+
+            // Display the results list and action buttons if an image has been captured or is processing.
+            if capturedImage != nil || isProcessing {
+
+                // Section displaying detected numbers or processing indicator.
+                List {
+                    Section("Select Meter Reading") {
+                        if isProcessing {
+                            // Show a progress indicator while OCR is running.
+                            HStack { Spacer(); ProgressView(); Spacer() }
+                        } else if detectedNumbers.isEmpty {
+                            // Inform the user if no numbers were found.
+                            Text("No numbers detected in image.")
+                                .foregroundColor(.gray)
+                        } else {
+                            // Display each detected number as a selectable button.
+                            ForEach(detectedNumbers, id: \.self) { numberString in
+                                Button {
+                                    selectedReading = numberString
+                                    confirmationMessage = "" // Clear previous confirmation on new selection.
+                                } label: {
+                                    HStack {
+                                        Text(numberString)
+                                            .font(.title)
+                                            .fontWeight(selectedReading == numberString ? .bold : .regular)
+                                            .foregroundColor(selectedReading == numberString ? .blue : .primary)
+                                        Spacer()
+                                        // Show a checkmark next to the selected reading.
+                                        if selectedReading == numberString {
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .foregroundColor(.blue)
+                                                .font(.title)
+                                        }
                                     }
+                                    .padding(.vertical, 5)
                                 }
-                                .contentShape(Rectangle())
+                                .buttonStyle(.plain) // Use plain style to make it look like a list item.
                             }
-                            .buttonStyle(.plain)
                         }
                     }
                 }
-            }
-            .listStyle(InsetGroupedListStyle())
-            // Make the list flexible in size but not necessarily take all space
-            // .layoutPriority(1) // Optional: Give list priority if needed
+                .listStyle(InsetGroupedListStyle()) // Apply standard grouped list styling.
 
-            // --- NEW: Confirmation Section ---
-            VStack {
-                Divider() // Visual separator
-
-                HStack {
-                    Text("Selected:")
-                        .font(.headline)
-                    // Display the selected reading or "None"
-                    Text(selectedReading ?? "None")
-                        .font(.body.monospacedDigit()) // Use monospaced for numbers
-                        .foregroundColor(selectedReading == nil ? .gray : .primary)
-                    Spacer() // Pushes button to the right
-                    Button("Confirm Reading") {
-                        // Action: Set confirmation message (simulate saving)
-                        if let reading = selectedReading {
-                            confirmationMessage = "Reading '\(reading)' stored successfully!"
-                            print("Confirmed reading: \(reading)")
-                            // Optionally disable button after confirm, or clear selection?
-                            // For now, just show message. User can re-confirm if desired.
-                        }
-                    }
-                    // Enable button only if a reading IS selected
-                    .disabled(selectedReading == nil)
-                    .buttonStyle(.borderedProminent)
-                }
-                .padding([.horizontal, .top]) // Add padding to this HStack
-
-                // Display the confirmation message if it's not empty
+                // Display the confirmation message if one exists.
                 if !confirmationMessage.isEmpty {
                     Text(confirmationMessage)
                         .font(.caption)
                         .foregroundColor(.green)
                         .padding(.horizontal)
-                        .padding(.top, 5)
-                        .transition(.opacity) // Add a subtle fade
+                        .transition(.opacity) // Animate the appearance/disappearance.
                 }
 
-                Spacer().frame(height: 10) // Add some space at the bottom
-            }
-            .background(.regularMaterial) // Give confirmation area a distinct background
-            // --- END Confirmation Section ---
+                // Action buttons displayed after a scan.
+                HStack {
+                    // Button to clear results and initiate a new scan.
+                    Button {
+                        scanButtonTapped()
+                    } label: {
+                        Label("Re-scan Meter", systemImage: "camera.viewfinder")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
 
-            // Scan button might be better placed above confirmation area or within it
-            // Let's keep it at the very bottom for now.
-            Spacer() // Pushes Scan button down
+                    Spacer()
 
-            Button {
-                self.detectedNumbers = []
-                self.selectedReading = nil
-                self.capturedImage = nil
-                self.confirmationMessage = "" // Clear confirmation on new scan
-                self.showCamera = true
-            } label: {
-                Label("Scan Meter", systemImage: "camera.viewfinder")
+                    // Button to confirm the selected reading.
+                    Button("Confirm Reading") {
+                        if let reading = selectedReading {
+                            confirmationMessage = "Reading '\(reading)' stored successfully!"
+                            // In a real app, this would likely save the reading and navigate away.
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .disabled(selectedReading == nil) // Disable if no reading is selected.
+                }
+                .padding() // Add padding around the button row.
+
+            } else {
+                // Initial state shown before any image is captured.
+                Spacer()
+                Text("Tap button to scan the meter.")
+                    .font(.headline)
+                    .foregroundColor(.gray)
+                Spacer()
+                // Button to initiate the first scan.
+                Button {
+                   scanButtonTapped()
+                } label: {
+                    Label("Scan Meter", systemImage: "camera.viewfinder")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .padding()
+                Spacer()
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .padding() // Add padding below the button
 
         } // End main VStack
         .navigationTitle("Read Meter")
+        // Present the ImagePicker view as a sheet when showCamera is true.
         .sheet(isPresented: $showCamera) {
-            ImagePicker(selectedImage: $capturedImage, isFrontCamera: false) // Specify false
+            ImagePicker(selectedImage: $capturedImage, isFrontCamera: false) // Use rear camera for meters.
         }
-        .onChange(of: capturedImage) { _, newImage in // iOS 17+ signature
+        // Observe changes to the capturedImage property.
+        .onChange(of: capturedImage) { _, newImage in
             if let image = newImage {
-                print("MeterReadingView: onChange detected new image. Launching processing Task.")
+                // When a new image is set, start the OCR processing task.
                 Task {
+                    // Reset UI state before processing.
                     await MainActor.run {
                         isProcessing = true
                         detectedNumbers = []
                         selectedReading = nil
-                        confirmationMessage = "" // Clear confirmation message
+                        confirmationMessage = ""
                     }
-                    await performVisionRequest(on: image) // This populates detectedNumbers and auto-selects selectedReading
+                    // Perform the OCR request on the captured image.
+                    await performVisionRequest(on: image)
+                    // Update UI state after processing is complete.
                     await MainActor.run {
                         isProcessing = false
                     }
@@ -144,72 +165,114 @@ struct MeterReadingView: View {
 
     } // End body
 
-    // MARK: - Vision Processing Function (Unchanged from previous step)
+    // MARK: - Actions
 
-    @MainActor
+    /// Resets the state and triggers the presentation of the camera/image picker.
+    private func scanButtonTapped() {
+        self.detectedNumbers = []
+        self.selectedReading = nil
+        self.capturedImage = nil // Clear the previous image to reset the UI state.
+        self.confirmationMessage = ""
+        self.showCamera = true
+    }
+
+
+    // MARK: - Vision Processing Function
+
+    /// Performs the OCR request using the Vision framework on the provided image.
+    @MainActor // Ensures UI updates triggered within happen on the main thread.
     private func performVisionRequest(on image: UIImage) async {
         guard let cgImage = image.cgImage else {
-            print("MeterReadingView Error: Failed to get CGImage.")
+            // Failed to get the underlying CGImage, cannot proceed.
+            // In a real app, show an error message to the user.
             return
         }
+        // Determine the correct orientation for the Vision request.
         let imageOrientation = cgOrientation(from: image.imageOrientation)
-        print("MeterReadingView DEBUG: Using CGImagePropertyOrientation: \(imageOrientation.rawValue)")
-        print("MeterReadingView: Starting Vision Text Recognition (New API)...")
-        var textRequest = RecognizeTextRequest()
-        textRequest.recognitionLevel = .accurate
-        textRequest.usesLanguageCorrection = true
 
-        var numbersOnly: [String] = []
+        // Configure the text recognition request.
+        var textRequest = RecognizeTextRequest()
+        textRequest.recognitionLevel = .accurate // Prioritize accuracy over speed.
+        textRequest.usesLanguageCorrection = true // Enable language correction for potentially better results.
+
+        var numbersFound: [String] = []
         var autoSelectedReading: String? = nil
 
         do {
-            print("MeterReadingView: Performing RecognizeTextRequest directly...")
+            // Perform the text recognition request asynchronously.
             let results: [RecognizedTextObservation] = try await textRequest.perform(
                 on: cgImage,
                 orientation: imageOrientation
             )
-            print("MeterReadingView OCR success: Found \(results.count) raw observations.")
 
-            // Filter for Numbers
+            // Process the observations returned by the Vision request.
             for observation in results {
+                // Get the top candidate string for each observation.
                 guard let topCandidate = observation.topCandidates(1).first else { continue }
-                let cleanedText = topCandidate.string.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                // Clean the text: remove whitespace and optionally commas.
+                let cleanedText = topCandidate.string
+                                      .trimmingCharacters(in: .whitespacesAndNewlines)
+                                      .replacingOccurrences(of: ",", with: "") // Remove commas if present.
+
+                // Check if the cleaned text represents a valid number.
                 if Double(cleanedText) != nil {
-                    numbersOnly.append(cleanedText)
+                    numbersFound.append(cleanedText)
                 }
             }
-            print("Found \(numbersOnly.count) potential numbers.")
 
-            // Auto-select Largest Number
-            if !numbersOnly.isEmpty {
-                autoSelectedReading = numbersOnly.max { (str1, str2) -> Bool in
-                    let num1 = Double(str1) ?? -Double.infinity
-                    let num2 = Double(str2) ?? -Double.infinity
-                    return num1 < num2
+            // Auto-select the number closest to the target value if any numbers were found.
+            if !numbersFound.isEmpty {
+                var minDifference = Double.infinity
+                var closestNumberString: String? = nil
+
+                for numberString in numbersFound {
+                    if let numberValue = Double(numberString) {
+                        let difference = abs(numberValue - targetValue)
+                        if difference < minDifference {
+                            minDifference = difference
+                            closestNumberString = numberString
+                        }
+                    }
                 }
-                print("Automatically selected largest number string: \(autoSelectedReading ?? "None")")
+                autoSelectedReading = closestNumberString
             }
 
         } catch {
-            print("MeterReadingView Error: Failed to perform Vision request: \(error.localizedDescription)")
-            numbersOnly = []
+            // Handle errors during the Vision request.
+            // In a real app, show an error message to the user.
+            numbersFound = []
             autoSelectedReading = nil
         }
 
-        // Update State (already on @MainActor)
-        self.detectedNumbers = numbersOnly
-        self.selectedReading = autoSelectedReading // Set initial selection
+        // Update the state variables on the main thread with the results.
+        // Sort the detected numbers numerically for display.
+        self.detectedNumbers = numbersFound.sorted {
+            (Double($0) ?? -Double.infinity) < (Double($1) ?? -Double.infinity)
+        }
+        // Set the initially selected reading based on proximity to the target value.
+        self.selectedReading = autoSelectedReading
 
-        print("MeterReadingView: Vision processing function finished.")
     } // End performVisionRequest
 
 
-    // --- Orientation Helper (Unchanged) ---
+    // MARK: - Orientation Helper
+
+    /// Converts a UIImage.Orientation to its corresponding CGImagePropertyOrientation,
+    /// required by the Vision framework.
     private func cgOrientation(from uiOrientation: UIImage.Orientation) -> CGImagePropertyOrientation {
          switch uiOrientation {
-            case .up: return .up; case .down: return .down; case .left: return .left; case .right: return .right;
-            case .upMirrored: return .upMirrored; case .downMirrored: return .downMirrored; case .leftMirrored: return .leftMirrored; case .rightMirrored: return .rightMirrored;
-            @unknown default: print("Warning: Unknown UIImage.Orientation (\(uiOrientation.rawValue)), defaulting to .up"); return .up
+            case .up: return .up
+            case .down: return .down
+            case .left: return .left
+            case .right: return .right
+            case .upMirrored: return .upMirrored
+            case .downMirrored: return .downMirrored
+            case .leftMirrored: return .leftMirrored
+            case .rightMirrored: return .rightMirrored
+            @unknown default:
+                // Handle potential future cases gracefully.
+                return .up
          }
     }
 
@@ -217,6 +280,7 @@ struct MeterReadingView: View {
 
 // MARK: - Preview
 #Preview {
+    // Provides a preview of the MeterReadingView within a NavigationView for development.
     NavigationView {
         MeterReadingView()
     }
