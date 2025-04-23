@@ -10,10 +10,11 @@ import math
 
 # Import the UPDATED detection function
 try:
-    from paligemma_detector_refactored_v2 import get_detections_from_image, _initialize_model_and_processor
+    # Make sure the detector script is named correctly or update the import
+    from paligemma_detector import get_detections_from_image, _initialize_model_and_processor
 except ImportError:
     print("Error: Could not import from 'paligemma_detector_refactored_v2.py'.")
-    print("Ensure the updated detector script is saved with that name or update the import.")
+    print("Ensure the updated detector script ('paligemma_detector_refactored_v2.py') is in the same directory or your PYTHONPATH.")
     sys.exit(1)
 
 # --- Configuration ---
@@ -25,7 +26,6 @@ TEST_RATIO = 0.15
 IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png']
 
 # --- Helper Functions (yolo_coord_conversion, paligemma_to_pixels) ---
-# (These functions remain the same as in v5)
 def yolo_coord_conversion(box_coords, img_width, img_height):
     if img_width <= 0 or img_height <= 0: return None
     xmin, ymin, xmax, ymax = box_coords
@@ -66,7 +66,7 @@ def process_image_batch(image_paths_with_split, output_path, required_pairs, sin
 
         target_img_dir = img_base_path / split
         target_lbl_dir = lbl_base_path / split
-        img_filename = source_img_path.name
+        img_filename = source_img_path.name # Keep original filename
         target_img_path = target_img_dir / img_filename
         target_lbl_path = target_lbl_dir / (source_img_path.stem + ".txt")
 
@@ -90,14 +90,13 @@ def process_image_batch(image_paths_with_split, output_path, required_pairs, sin
         allowed_labels_in_dir = set()
 
         if expected_label_from_dir:
-            classes_to_request = [expected_label_from_dir] # Ask only for the single expected class
+            classes_to_request = [expected_label_from_dir]
         elif source_dir_name in required_pairs:
-            classes_to_request = list(required_pairs[source_dir_name]) # Ask for the required pair
+            classes_to_request = list(required_pairs[source_dir_name])
             allowed_labels_in_dir.update(required_pairs[source_dir_name])
         else:
-            # Fallback: If dir type is unknown, request all classes
             classes_to_request = CLASSES
-            tqdm.write(f"Note: Requesting all classes for image {source_img_path.name} from unclassified directory '{source_dir_name}'.")
+            # tqdm.write(f"Note: Requesting all classes for image {source_img_path.name} from unclassified directory '{source_dir_name}'.")
 
 
         # --- Get detections using the targeted prompt ---
@@ -111,25 +110,21 @@ def process_image_batch(image_paths_with_split, output_path, required_pairs, sin
         yolo_lines = []
         detected_class_ids_final = set()
 
-        # --- Label Enforcement Logic (Still Recommended) ---
+        # --- Label Enforcement Logic ---
         for det in detections:
             pali_label = det['label']
             label_to_use = None
             class_id = -1
 
             if expected_label_from_dir:
-                # Force label based on directory for single-class dirs
                 label_to_use = expected_label_from_dir
             elif allowed_labels_in_dir:
-                # For multi-class dirs, only accept allowed labels predicted by PaliGemma
                 if pali_label in allowed_labels_in_dir:
                     label_to_use = pali_label
             else:
-                 # Fallback: Keep any label from the main CLASSES list
                  if pali_label in CLASS_MAP:
                      label_to_use = pali_label
 
-            # Convert and append if valid label determined
             if label_to_use:
                 try:
                     class_id = CLASS_MAP[label_to_use]
@@ -146,7 +141,7 @@ def process_image_batch(image_paths_with_split, output_path, required_pairs, sin
         # --- End Label Enforcement ---
 
 
-        # --- Warnings (based on final written labels) ---
+        # --- Warnings ---
         if not yolo_lines:
             tqdm.write(f"\nWARNING: No target objects written to label file for image: {source_img_path.name}")
             no_target_object_warning_count += 1
@@ -176,7 +171,7 @@ def process_image_batch(image_paths_with_split, output_path, required_pairs, sin
             if target_lbl_path.exists():
                 try: target_lbl_path.unlink()
                 except OSError: pass
-            if target_img_path.exists(): # Also remove copied image if label write failed after copy
+            if target_img_path.exists():
                  try: target_img_path.unlink()
                  except OSError: pass
             error_count += 1
@@ -243,22 +238,44 @@ def main(input_dirs, output_dir, required_pairs_args):
     # --- 3. Stratified Splitting ---
     print("Performing stratified split...")
     all_splits_data = []
-    # (Stratified splitting logic remains the same)
+    # --- FIX for UnboundLocalError ---
     for source_dir_name, image_list in grouped_images.items():
-        if not image_list: continue; random.shuffle(image_list); n_images = len(image_list)
-        n_train = math.ceil(n_images*TRAIN_RATIO); n_val = math.ceil(n_images*VAL_RATIO)
-        if n_images>2 and n_train>=n_images-1: n_train=n_images-2; n_val=1; n_test=1
-        elif n_images>1 and n_train==n_images: n_train=n_images-1; n_val=1; n_test=0
-        else: n_test=n_images-n_train-n_val;
-        if n_test<0: n_test=0; n_val=n_images-n_train
+        if not image_list:
+            print(f"Warning: No images found in group '{source_dir_name}'. Skipping split for this group.")
+            continue # Skip this iteration if the list is empty
+
+        # Now we know image_list is not empty
+        random.shuffle(image_list)
+        n_images = len(image_list) # Define n_images safely here
+
+        # Calculate splits
+        n_train = math.ceil(n_images * TRAIN_RATIO)
+        n_val = math.ceil(n_images * VAL_RATIO)
+        # Adjust counts to ensure val/test get at least one if possible
+        if n_images > 2 and n_train >= n_images - 1: n_train = n_images - 2; n_val = 1; n_test = 1
+        elif n_images > 1 and n_train == n_images: n_train = n_images - 1; n_val = 1; n_test = 0
+        else:
+             n_test = n_images - n_train - n_val
+             if n_test < 0: n_test = 0; n_val = n_images - n_train # Ensure val doesn't overflow
+
         print(f"  Group '{source_dir_name}' ({n_images} images): Train={n_train}, Val={n_val}, Test={n_test}")
         current_idx = 0
-        for i in range(n_train): all_splits_data.append(("train", image_list[current_idx], source_dir_name)); current_idx += 1
+        # Assign images to splits
+        for i in range(n_train):
+            if current_idx < n_images: # Bounds check
+                 all_splits_data.append(("train", image_list[current_idx], source_dir_name))
+                 current_idx += 1
         for i in range(n_val):
-            if current_idx < n_images: all_splits_data.append(("val", image_list[current_idx], source_dir_name)); current_idx += 1
+            if current_idx < n_images:
+                 all_splits_data.append(("val", image_list[current_idx], source_dir_name))
+                 current_idx += 1
         for i in range(n_test):
-             if current_idx < n_images: all_splits_data.append(("test", image_list[current_idx], source_dir_name)); current_idx += 1
+             if current_idx < n_images:
+                 all_splits_data.append(("test", image_list[current_idx], source_dir_name))
+                 current_idx += 1
+    # --- End FIX ---
     print(f"Total images assigned to splits: {len(all_splits_data)}")
+
 
     # --- 4. Process Images and Generate Labels ---
     print("Processing images and generating YOLO labels (using targeted prompts)...")
@@ -268,7 +285,6 @@ def main(input_dirs, output_dir, required_pairs_args):
 
     # --- 5. Create data.yaml File ---
     print("Creating data.yaml file...")
-    # (data.yaml creation logic remains the same)
     data_yaml_content = {'path': str(output_path.resolve()), 'train': os.path.join('images', 'train'), 'val': os.path.join('images', 'val'), 'test': os.path.join('images', 'test'), 'nc': len(CLASSES), 'names': CLASSES}
     data_yaml_path = output_path / "data.yaml"
     try:
@@ -280,13 +296,11 @@ def main(input_dirs, output_dir, required_pairs_args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate YOLO dataset (Stratified Split, Targeted Detect, Enforce Labels).")
-    # Arguments remain the same
     parser.add_argument('--input-dirs', nargs='+', required=True, help='List of input directories containing raw images.')
     parser.add_argument('--output-dir', type=str, required=True, help='Directory where the YOLO dataset will be created.')
     parser.add_argument('--require-both', nargs=3, action='append', metavar=('DIR_NAME', 'CLASS1', 'CLASS2'), help='Specify input dir name and two classes that MUST both be detected. Example: --require-both helmet-glove helmet glove', default=[])
     args = parser.parse_args()
 
-    # Validation logic remains the same
     valid_input_dirs = []; input_dir_names = set()
     for d in args.input_dirs:
         p = Path(d);
@@ -294,4 +308,5 @@ if __name__ == "__main__":
         else: print(f"Warning: Input directory '{d}' not found. Ignored.")
     if not valid_input_dirs: print("Error: No valid input directories found. Exiting."); sys.exit(1)
 
+    # Pass args.require_both directly to main
     main(valid_input_dirs, args.output_dir, args.require_both)

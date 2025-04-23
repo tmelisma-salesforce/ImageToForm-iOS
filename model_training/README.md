@@ -1,6 +1,6 @@
 # YOLO Object Detection Dataset Generation Pipeline
 
-This project provides a pipeline to generate images using DALL-E 3, automatically annotate them for object detection using PaliGemma, and format the results into a YOLO-compatible dataset. It also includes a script to visualize the generated annotations for verification.
+This project provides a pipeline to generate images using DALL-E 3, automatically annotate them for object detection using PaliGemma, format the results into a YOLO-compatible dataset, train a YOLOv11-style model, and export it for deployment (e.g., Core ML). It also includes a script to visualize the generated annotations for verification.
 
 **Target Classes:** flip-flops, helmet, glove, boots
 
@@ -9,6 +9,7 @@ This project provides a pipeline to generate images using DALL-E 3, automaticall
 * Python 3.8 or higher
 * `pip` (Python package installer)
 * An OpenAI API Key (for DALL-E 3 image generation)
+* A Weights & Biases account (optional, for experiment tracking) - [https://wandb.ai/](https://wandb.ai/)
 
 ## Setup
 
@@ -18,7 +19,7 @@ This project provides a pipeline to generate images using DALL-E 3, automaticall
     git clone <repository_url>
     cd <repository_directory>
     ```
-    Otherwise, ensure all the scripts (`generate_dalle_images.py`, `paligemma_detector.py`, `generate_yolo_data.py`, `draw_yolo_boxes.py`) are in the same directory.
+    Otherwise, ensure all the scripts (`generate_dalle_images.py`, `paligemma_detector.py`, `generate_yolo_data.py`, `draw_yolo_boxes.py`, `predict_image.py`) are in the same directory.
 
 2.  **Create and Activate Virtual Environment:**
     It's highly recommended to use a virtual environment to manage dependencies.
@@ -35,9 +36,9 @@ This project provides a pipeline to generate images using DALL-E 3, automaticall
     You should see `(.venv)` at the beginning of your terminal prompt.
 
 3.  **Install Dependencies:**
-    Install the required Python libraries:
+    Install the required Python libraries, including Ultralytics (for YOLO training/export) and Weights & Biases (for logging):
     ```bash
-    pip install openai python-dotenv requests Pillow torch transformers torchvision PyYAML tqdm accelerate bitsandbytes
+    pip install ultralytics wandb openai python-dotenv requests Pillow torch torchvision PyYAML tqdm accelerate bitsandbytes
     ```
     *(Note: `bitsandbytes` and `accelerate` help with model loading and memory efficiency, especially on GPUs/MPS).*
 
@@ -47,6 +48,17 @@ This project provides a pipeline to generate images using DALL-E 3, automaticall
     OPENAI_API_KEY='your_openai_api_key_here'
     ```
     Replace `your_openai_api_key_here` with your actual secret key. **Do not commit this file to version control.**
+
+5.  **Log in to Weights & Biases (Optional):**
+    If you want to track your experiments, log in to W&B:
+    ```bash
+    wandb login
+    ```
+    Follow the prompts (you'll likely need to paste an API key from your W&B account settings).
+    You might also need to explicitly enable W&B integration for the `yolo` CLI (run this once):
+    ```bash
+    yolo settings wandb=True
+    ```
 
 ## Directory Structure
 
@@ -74,6 +86,7 @@ This project provides a pipeline to generate images using DALL-E 3, automaticall
         ├── val/
         └── test/
     ```
+* **Training Runs Directory:** The YOLO training script automatically creates a directory (usually `runs/detect/`) to save results for each run (logs, weights, plots).
 * **Visualization Output Directory:** The `draw_yolo_boxes.py` script creates this directory (specified via `--output-dir`) to store images with bounding boxes drawn on them.
 
 ## Running the Pipeline
@@ -82,55 +95,35 @@ Make sure your virtual environment is activated (`source .venv/bin/activate`) be
 
 **Step 1: Generate Source Images (Optional)**
 
-If you need to generate images using DALL-E 3, use the `generate_dalle_images.py` script. Run it separately for each category you need.
+Use `generate_dalle_images.py` if you need to create images via DALL-E 3.
 
-* Generate 10 flip-flop images into a directory named `source_flipflops`:
-    ```bash
-    python generate_dalle_images.py --category flip-flops --num-images 10 --output-dir source_flipflops
-    ```
-* Generate 10 boot images into `source_boots`:
-    ```bash
-    python generate_dalle_images.py --category boots --num-images 10 --output-dir source_boots
-    ```
-* Generate 10 helmet/glove images into `source_helmet_glove`:
-    ```bash
-    python generate_dalle_images.py --category helmet-glove --num-images 10 --output-dir source_helmet_glove
-    ```
-    *(Adjust `--num-images`, `--output-dir`, `--size`, `--quality` as needed).*
+```bash
+# Example: Generate 10 helmet/glove images into source_helmet_glove
+python generate_dalle_images.py --category helmet-glove --num-images 10 --output-dir source_helmet_glove
+```
+
+*(Adjust `--num-images`, `--output-dir`, `--size`, `--quality` as needed).*
 
 **Step 2: Generate YOLO Dataset**
 
-Use the `generate_yolo_data.py` script to process your source images (either generated or provided by you) and create the YOLO formatted dataset. This script uses PaliGemma for automatic annotation.
+Use `generate_yolo_data.py` to process source images and create the YOLO formatted dataset. This script uses PaliGemma for automatic annotation.
 
 * Provide the directories containing your source images using `--input-dirs`.
 * Specify the desired output directory name using `--output-dir`.
 * Use `--require-both` for directories where specific multiple objects *must* be detected (like helmet and glove).
 
 ```bash
+# Example: Process images from 3 source dirs, output to yolo_ppe_dataset, require helmet & glove in helmet-glove dir
 python generate_yolo_data.py \
     --input-dirs source_flipflops source_boots source_helmet_glove \
     --output-dir yolo_ppe_dataset \
     --require-both helmet-glove helmet glove
 ```
-*(Replace `source_flipflops`, `source_boots`, `source_helmet_glove` with the actual paths to your image directories. Replace `yolo_ppe_dataset` with your desired output name.)*
-
-This script will:
-
-* Load the PaliGemma model (this might take time on the first run).
-* Scan the input directories.
-* Perform stratified splitting into train/val/test sets.
-* Process each image: detect objects, convert to YOLO format, write label files.
-* **Copy** images to the output directory structure (`yolo_ppe_dataset/images/...`).
-* Create the `yolo_ppe_dataset/data.yaml` file.
-* Print warnings if target objects aren't found or required objects are missing.
-* The script is idempotent – it skips images if the corresponding label file already exists in the output directory.
+*(Replace source directories and output directory name as needed.)*
 
 **Step 3: Visualize Annotations (Verification)**
 
-After generating the dataset, use `draw_yolo_boxes.py` to create visual copies of the images with the generated bounding boxes drawn on them. This helps verify the quality of the automatic annotations.
-
-* Provide the path to the generated YOLO dataset directory using `--dataset-dir`.
-* Specify an output directory for the visualized images using `--output-dir`.
+Use `draw_yolo_boxes.py` to visually check the *ground truth* labels generated in Step 2 **before** training. This helps verify the quality of the automatic annotations.
 
 ```bash
 python draw_yolo_boxes.py \
@@ -138,13 +131,73 @@ python draw_yolo_boxes.py \
     --output-dir yolo_ppe_dataset_visualized
 ```
 
-*(Replace `yolo_ppe_dataset` with the actual name of your generated dataset directory.)*
+*(Review the images created in `yolo_ppe_dataset_visualized`.)*
 
-This will create a new directory (e.g., `yolo_ppe_dataset_visualized`) containing `train`, `val`, and `test` subdirectories with images that have red bounding boxes and class labels drawn on them. Review these images to ensure the PaliGemma detections and YOLO conversions are accurate.
+**Step 4: Train YOLO Model**
+
+Use the `yolo` command (from the Ultralytics library) to train a model on your verified generated dataset.
+
+* **Choose a Model:** Start with a smaller pre-trained model like `yolo11n.pt` or `yolo11s.pt`.
+* **Set `patience`:** Use early stopping (e.g., `patience=20` or `patience=50`) to stop training automatically when validation metrics stop improving. Set `epochs` to a high number (e.g., `epochs=300`).
+* **Specify Device:** Use `device=mps` for Apple Silicon.
+* **W&B Logging:** If logged in and enabled, logging should start automatically.
+
+```bash
+# Example: Train the 'small' model with patience
+yolo detect train \
+    data=yolo_ppe_dataset/data.yaml \
+    model=yolo11s.pt \
+    epochs=300 \
+    patience=50 \
+    imgsz=640 \
+    batch=8 \
+    device=mps \
+    name=small_run_p50 \
+    project=PPE_Detection
+```
+*(Adjust `model`, `batch`, `name`, `patience`, `epochs` as needed. Ensure `data=` points to your `data.yaml` file.)*
+
+* **Monitoring:** Watch validation metrics (`mAP50-95`) in the terminal or on W&B. Training stops based on `patience`.
+* **Resuming:** If interrupted (`Ctrl+C`), resume using `last.pt`:
+  ```bash
+  yolo detect train resume model=runs/detect/small_run_p50/weights/last.pt
+  ```
+
+  **Step 5: Export Trained Model (for Deployment)**
+
+Once training is complete and you're satisfied with the `best.pt` model, export it to your desired format (e.g., Core ML). Include NMS.
+
+```bash
+# Example: Export the best model from the 'small_run_p50' run to Core ML
+yolo export \
+    model=runs/detect/small_run_p50/weights/best.pt \
+    format=coreml \
+    nms=True
+```
+
+*(This creates a `.mlpackage` or `.mlmodel` file.)*
+
+**Step 6: Test Model Predictions (Optional but Recommended)**
+
+Use `predict_image.py` (or `yolo predict`) with your exported `best.pt` model to see how it performs on individual test images and visualize its predictions.
+
+```bash
+# Example using the script
+python predict_image.py \
+    --model runs/detect/small_run_p50/weights/best.pt \
+    --image yolo_ppe_dataset/images/test/some_test_image.png \
+    --output-dir test_predictions \
+    --data-yaml yolo_ppe_dataset/data.yaml
+
+# Example using the CLI (creates output in runs/detect/predict*)
+# yolo predict model=runs/detect/small_run_p50/weights/best.pt source=yolo_ppe_dataset/images/test/some_test_image.png device=mps save=True
+```
 
 ## Script Explanations
 
-* **`generate_dalle_images.py`**: Uses the OpenAI API (DALL-E 3) to generate new images based on predefined text prompts for different categories. Saves images to a specified directory.
-* **`paligemma_detector.py`**: A module containing functions to load the PaliGemma model and perform object detection on a given image, returning detected object labels and their normalized bounding boxes. This is used internally by `generate_yolo_data.py`.
-* **`generate_yolo_data.py`**: The main script for creating the YOLO dataset. It orchestrates finding source images, calling the PaliGemma detector, converting annotations to YOLO format, performing a stratified train/val/test split, copying images, and creating the `data.yaml` file.
-* **`draw_yolo_boxes.py`**: A utility script to read a generated YOLO dataset and produce visualized images with bounding boxes and labels drawn, useful for verification.
+* **`generate_dalle_images.py`**: Uses OpenAI API (DALL-E 3) to generate new images.
+* **`paligemma_detector.py`**: Module used by the generator script to detect objects using PaliGemma.
+* **`generate_yolo_data.py`**: Creates the YOLO dataset (images/labels/yaml) using PaliGemma for annotation and performs stratified splitting. Enforces labels based on source directory structure.
+* **`draw_yolo_boxes.py`**: Visualizes the *ground truth* annotations from a generated YOLO dataset.
+* **`predict_image.py`**: Runs inference with a trained YOLO model on a single image and saves a visualized output showing the *model's predictions*.
+* **`yolo` command (Ultralytics)**: Used for training (`train`), exporting (`export`), and prediction (`predict`).
