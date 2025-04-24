@@ -42,7 +42,7 @@ struct EquipmentFormView: View {
 
     /// Helper to calculate form height
     private func calculateFormHeight() -> CGFloat {
-        let rowCount = 7; let rowHeightEstimate: CGFloat = 55
+        let rowCount = 7; let rowHeightEstimate: CGFloat = 75
         return CGFloat(rowCount) * rowHeightEstimate
     }
 }
